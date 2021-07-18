@@ -12,10 +12,7 @@ use reqwest::{
 };
 use serde::Deserialize;
 
-use crate::{
-    error::{OrlyError, Result},
-    models::{BillingInfo, Book, Chapter, ChaptersResponse, Credentials},
-};
+use crate::{error::{OrlyError, Result}, models::{BillingInfo, Book, Chapter, ChaptersResponse, Credentials, TocElement}};
 
 const CONCURRENT_REQUESTS: usize = 10;
 
@@ -43,10 +40,6 @@ impl OreillyClient {
         }
     }
 
-    // async fn make_request(&self, method: String, url: String, endpoint: String) -> Response {
-
-    // }
-
     pub async fn cred_auth(&self, email: String, password: String) -> Result<()> {
         println!("Logging into Safari Books Online...");
 
@@ -71,10 +64,6 @@ impl OreillyClient {
             _ => (),
         }
 
-        // println!("{:#?}", response.bytes().await?);
-
-        // let result: serde_json::Value = response.json().await?;
-
         let credentials = response.json::<Credentials>().await?;
 
         if !credentials.logged_in {
@@ -82,8 +71,6 @@ impl OreillyClient {
                 "Expected to be logged in".to_string(),
             ));
         }
-
-        // println!("{:#?}", credentials);
 
         Ok(())
     }
@@ -127,7 +114,6 @@ impl OreillyClient {
 
         let biling = response.json::<BillingInfo>().await?;
 
-        // "2021-07-23T20:51:36.072160Z"
         let expiration = DateTime::parse_from_rfc3339(&biling.next_billing_date)
             .context("Failed to parse next billing date")?;
 
@@ -190,11 +176,11 @@ impl OreillyClient {
             })
             .buffer_unordered(CONCURRENT_REQUESTS);
 
+        // Todo handle failed requests
         bodies
             .for_each(
                 |response| {
                     if let Ok(b) = response {
-                        // println!("Here: {:?}", &b.results[0]);
                         chapters.extend(b.results);
                     } else {
                         println!("Err {:?}", response);
@@ -212,5 +198,19 @@ impl OreillyClient {
             .await;
 
         Ok(chapters)
+    }
+
+    pub async fn fetch_toc(&self, book_id: &str) -> Result<Vec<TocElement>> {
+        println!("Loading table of contents");
+        
+        let response = self
+            .client
+            .get(self.make_url(&format!("api/v1/book/{}/toc", book_id))?)
+            .send()
+            .await?;
+
+        response.error_for_status_ref()?;
+
+        Ok(response.json::<Vec<TocElement>>().await?)
     }
 }

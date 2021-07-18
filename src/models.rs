@@ -20,13 +20,13 @@ pub(crate) struct Credentials {
 #[derive(Deserialize, Debug)]
 pub struct Book {
     // chapters: Vec<String>,
-    cover: String,
-    chapter_list: String,
-    toc: String,
-    flat_toc: String,
-    title: String,
-    source: String,
-    pagecount: usize,
+    pub cover: String,
+    pub chapter_list: String,
+    pub toc: String,
+    pub flat_toc: String,
+    pub title: String,
+    pub source: String,
+    pub pagecount: usize,
 }
 
 #[derive(Deserialize, Debug)]
@@ -61,4 +61,31 @@ pub(crate) struct ChaptersResponse {
     pub next: Option<String>,
     pub previous: Option<String>,
     pub results: Vec<Chapter>,
+}
+
+//     "": 1,
+    // "": "https://learning.oreilly.com/api/v1/book/0735619670/chapter/index.html",
+    // "": 1.15,
+    // "": "",
+    // "": "index.html",
+    // "": ["0735619670", "index.html"],
+    // "": "Code Complete, Second Edition",
+    // "": "index.html",
+    // "": "index.html",
+    // "": "urn:orm:book:0735619670:chapter:index.html",
+    // "": "application/xhtml+xml",
+#[derive(Deserialize, Debug)]
+pub struct TocElement {
+    pub depth: usize,
+    pub url: String,
+    pub minutes_required: f64,
+    pub fragment: String,
+    pub filename: String,
+    pub natural_key: Vec<String>,
+    pub label: String,
+    pub full_path: String,
+    pub href: String,
+    pub id: String,
+    pub media_type: String,
+    pub children: Vec<Box<TocElement>>,
 }

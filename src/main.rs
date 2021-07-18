@@ -19,11 +19,16 @@ async fn run() -> Result<()> {
     client.check_login().await?;
 
     let book = client.fetch_book_deails(book_id.to_string()).await?;
-    println!("{:?}", book);
+    println!("{:#?}", book);
 
     let chapters = client.fetch_book_chapters(book_id.to_string()).await?;
 
     println!("Downloaded {} chapters", chapters.len());
+
+    let toc = client.fetch_toc(book_id).await?;
+
+    println!("Downloaded toc: {:?}", toc.len());
+
 
     Ok(())
 }
