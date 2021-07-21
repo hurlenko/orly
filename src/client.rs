@@ -184,23 +184,23 @@ impl OreillyClient<Authenticated> {
 
         response.error_for_status_ref()?;
 
-        let chapter_response = response.json::<ChaptersResponse>().await?;
+        let first_page = response.json::<ChaptersResponse>().await?;
 
-        let mut chapters: Vec<Chapter> = Vec::with_capacity(chapter_response.count);
-        chapters.extend(chapter_response.results);
+        let total_chapters = first_page.count;
+        let per_page = first_page.results.len();
+        let pages = (first_page.count + (per_page - 1)) / per_page;
+        let mut chapters = first_page.results;
 
-        let per_page = chapters.len();
-        let pages = (chapter_response.count + (per_page - 1)) / per_page;
         println!(
             "Downloading {} chapters, {} chapters per page, {} pages",
-            chapter_response.count, per_page, pages
+            total_chapters, per_page, pages
         );
 
         let bodies = stream::iter(2..=pages)
             .map(|page| {
                 let client = &self.client;
                 let url = &url;
-                // let url = self.make_url(&format!("api/v1/book/{}/chapter", book_id))?;
+
                 async move {
                     let resp = client.get(url).query(&[("page", page)]).send().await?;
                     resp.json::<ChaptersResponse>().await
@@ -208,26 +208,14 @@ impl OreillyClient<Authenticated> {
             })
             .buffer_unordered(CONCURRENT_REQUESTS);
 
-        // Todo handle failed requests
-        bodies
-            .for_each(
-                |response| {
-                    if let Ok(b) = response {
-                        chapters.extend(b.results);
-                    } else {
-                        println!("Err {:?}", response);
-                    }
-                    futures::future::ready(())
-                },
-                //     match response {
-                //     Ok(b) => {
-                //         chapters.extend(b.results);
-                //         futures::future::ready(())
-                //     }
-                //     Err(e) => futures::future::ready(()),
-                // }
-            )
-            .await;
+        let rest_pages = bodies
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        chapters.reserve_exact(total_chapters - per_page);
+        chapters.extend(rest_pages.into_iter().flat_map(|r| r.results));
 
         Ok(chapters)
     }
