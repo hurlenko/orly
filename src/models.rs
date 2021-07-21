@@ -63,17 +63,6 @@ pub(crate) struct ChaptersResponse {
     pub results: Vec<Chapter>,
 }
 
-//     "": 1,
-    // "": "https://learning.oreilly.com/api/v1/book/0735619670/chapter/index.html",
-    // "": 1.15,
-    // "": "",
-    // "": "index.html",
-    // "": ["0735619670", "index.html"],
-    // "": "Code Complete, Second Edition",
-    // "": "index.html",
-    // "": "index.html",
-    // "": "urn:orm:book:0735619670:chapter:index.html",
-    // "": "application/xhtml+xml",
 #[derive(Deserialize, Debug)]
 pub struct TocElement {
     pub depth: usize,
