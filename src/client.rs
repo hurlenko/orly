@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Local};
 use futures::stream::{self, StreamExt};
 
 use anyhow::Context;
@@ -68,27 +68,7 @@ impl OreillyClient<Unauthenticated> {
     }
 
     async fn check_login(&self) -> Result<()> {
-        let response = self
-            .client
-            .get(self.make_url("api/v1/subscriber/")?)
-            .query(&[("format", "json")])
-            .send()
-            .await?;
-
-        response.error_for_status_ref()?;
-
-        #[derive(Deserialize, Debug)]
-        struct Subscription {
-            #[serde(rename = "Status")]
-            status: String,
-        }
-
-        let subscription = response.json::<Subscription>().await?;
-
-        if subscription.status != "Active" {
-            return Err(OrlyError::SubscriptionExpired);
-        }
-
+        println!("Validating subscription");
         let response = self
             .client
             .get(self.make_url("api/v1/payments/next_billing_date/")?)
@@ -97,12 +77,14 @@ impl OreillyClient<Unauthenticated> {
 
         response.error_for_status_ref()?;
 
-        let biling = response.json::<BillingInfo>().await?;
+        let billing = response.json::<BillingInfo>().await?;
 
-        let expiration = DateTime::parse_from_rfc3339(&biling.next_billing_date)
+        let expiration = DateTime::parse_from_rfc3339(&billing.next_billing_date)
             .context("Failed to parse next billing date")?;
+        
+        let local: DateTime<Local> = DateTime::from(expiration);
 
-        println!("Subscription expiration: {}", expiration);
+        println!("Subscription expiration: {}", local);
 
         if expiration < Utc::now() {
             return Err(OrlyError::SubscriptionExpired);
@@ -158,7 +140,7 @@ impl OreillyClient<Unauthenticated> {
 }
 
 impl OreillyClient<Authenticated> {
-    pub async fn fetch_book_deails(&self, book_id: String) -> Result<Book> {
+    pub async fn fetch_book_deails(&self, book_id: &str) -> Result<Book> {
         let response = self
             .client
             .get(self.make_url(&format!("api/v1/book/{}/", book_id))?)
@@ -170,7 +152,7 @@ impl OreillyClient<Authenticated> {
         Ok(response.json::<Book>().await?)
     }
 
-    pub async fn fetch_book_chapters(&self, book_id: String) -> Result<Vec<Chapter>> {
+    pub async fn fetch_book_chapters(&self, book_id: &str) -> Result<Vec<Chapter>> {
         println!("Loading chapter information");
         let url = self
             .make_url(&format!("api/v1/book/{}/chapter", book_id))?

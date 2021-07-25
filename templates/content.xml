@@ -1,0 +1,36 @@
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid" version="2.0">
+   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+      <dc:title>{{ title }}</dc:title>
+      {% for author in authors %}
+         <dc:creator opf:file-as="{{ author.name }}" opf:role="aut">{{ author.name }}</dc:creator>
+      {% endfor %}
+      <dc:description>{{ description }}</dc:description>
+      {% for subject in subjects %}
+         <dc:subject>{{ subject.name }}</dc:subject>
+      {% endfor %}
+      <dc:publisher>{{ publishers }}</dc:publisher>
+      <dc:rights>{{ rights }}</dc:rights>
+      <dc:language>en-US</dc:language>
+      <dc:date>{{ issued }}</dc:date>
+      <dc:identifier id="bookid">{{ isbn }}</dc:identifier>
+      <meta name="cover" content="{{ book_cover }}" />
+   </metadata>
+   <manifest>
+      <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+      {% for item in manifest %}
+         <item id="{{ item.id }}" href="{{ item.href }}" media-type="{{ item.mediatype }}" />
+      {% endfor %}
+   </manifest>
+   <spine toc="ncx">
+      {% for item_id in spine %}
+         <itemref idref="{{ item_id }}"/>
+      {% endfor %}
+   </spine>
+   <guide>
+      <reference href="{{ cover_filename }}" title="Cover" type="cover" />
+   </guide>
+</package>
+

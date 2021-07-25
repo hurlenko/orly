@@ -50,7 +50,7 @@ pub struct Chapter {
     images: Vec<String>,
     stylesheets: Vec<Stylesheet>,
     site_styles: Vec<String>,
-    content: String,
+    pub content: String,
     next_chapter: ChapterNode,
     previous_chapter: ChapterNode,
 }
