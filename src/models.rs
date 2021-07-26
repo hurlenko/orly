@@ -1,4 +1,24 @@
-use serde::Deserialize;
+use reqwest::Url;
+use serde::{de::Error, Deserialize, Deserializer};
+
+fn parse_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: &str = Deserialize::deserialize(deserializer)?;
+    Url::parse(s).map_err(D::Error::custom)
+}
+
+fn parse_vec_url<'de, D>(deserializer: D) -> Result<Vec<Url>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let vec: Vec<&str> = Deserialize::deserialize(deserializer)?;
+    vec.into_iter()
+        .map(|s| Url::parse(s))
+        .collect::<std::result::Result<_, _>>()
+        .map_err(D::Error::custom)
+}
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct BillingInfo {
@@ -31,28 +51,33 @@ pub struct Book {
 
 #[derive(Deserialize, Debug)]
 pub struct Stylesheet {
-    full_path: String,
-    url: String,
-    original_url: String,
+    pub full_path: String,
+    #[serde(deserialize_with = "parse_url")]
+    pub url: Url,
+    pub original_url: String,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct ChapterNode {
-    url: String,
-    web_url: String,
-    title: String,
+    pub url: String,
+    pub web_url: String,
+    pub title: String,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Chapter {
-    title: String,
-    filename: String,
-    images: Vec<String>,
-    stylesheets: Vec<Stylesheet>,
-    site_styles: Vec<String>,
-    pub content: String,
-    next_chapter: ChapterNode,
-    previous_chapter: ChapterNode,
+    #[serde(deserialize_with = "parse_url")]
+    pub asset_base_url: Url,
+    pub title: String,
+    pub filename: String,
+    pub images: Vec<String>,
+    pub stylesheets: Vec<Stylesheet>,
+    #[serde(deserialize_with = "parse_vec_url")]
+    pub site_styles: Vec<Url>,
+    #[serde(deserialize_with = "parse_url", rename = "content")]
+    pub content_url: Url,
+    pub next_chapter: ChapterNode,
+    pub previous_chapter: ChapterNode,
 }
 
 #[derive(Deserialize, Debug)]

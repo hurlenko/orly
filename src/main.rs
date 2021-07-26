@@ -19,8 +19,8 @@ async fn run() -> Result<()> {
         )
         .await?;
 
-    // epub::build_epub(client, book_id).await?;
-    html::rewrite()?;
+    epub::build_epub(client, book_id).await?;
+    // html::rewrite()?;
 
     Ok(())
 }

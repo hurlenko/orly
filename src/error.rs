@@ -2,7 +2,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum OrlyError {
-    #[error("Request failed")]
+    #[error("Request failed: {0}")]
     HttpRequest(#[from] reqwest::Error),
     #[error("Authentication failure: {0}")]
     AuthenticationFailed(String),
