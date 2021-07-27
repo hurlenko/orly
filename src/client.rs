@@ -1,20 +1,20 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc, Local};
+use bytes::Bytes;
+use chrono::{DateTime, Local, Utc};
 use futures::stream::{self, StreamExt};
 
-use anyhow::Context;
+use anyhow::{Chain, Context};
 use reqwest::{
     header::{
         HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
     },
     Client, Url,
 };
-use serde::Deserialize;
 
 use crate::{
     error::{OrlyError, Result},
-    models::{BillingInfo, Book, Chapter, ChaptersResponse, Credentials, TocElement},
+    models::{BillingInfo, Book, Chapter, ChapterMeta, ChaptersResponse, Credentials, TocElement},
 };
 
 const CONCURRENT_REQUESTS: usize = 10;
@@ -81,7 +81,7 @@ impl OreillyClient<Unauthenticated> {
 
         let expiration = DateTime::parse_from_rfc3339(&billing.next_billing_date)
             .context("Failed to parse next billing date")?;
-        
+
         let local: DateTime<Local> = DateTime::from(expiration);
 
         println!("Subscription expiration: {}", local);
@@ -152,7 +152,39 @@ impl OreillyClient<Authenticated> {
         Ok(response.json::<Book>().await?)
     }
 
-    pub async fn fetch_book_chapters(&self, book_id: &str) -> Result<Vec<Chapter>> {
+    pub async fn download_bytes(&self, url: Url) -> Result<Bytes> {
+        Ok(self.client.get(url).send().await?.bytes().await?)
+    }
+
+    pub async fn download_text(&self, url: Url) -> Result<String> {
+        Ok(self.client.get(url).send().await?.text().await?)
+    }
+
+    async fn fetch_chapters_content(
+        &self,
+        chapters_meta: Vec<ChapterMeta>,
+    ) -> Result<Vec<Chapter>> {
+        println!("Fetching chapter content");
+
+        let chapters = stream::iter(chapters_meta.into_iter())
+            .map(|meta| {
+                async move {
+                    let content = self.download_text(meta.content_url.clone()).await?;
+                    Ok::<Chapter, OrlyError>(Chapter { meta, content })
+                }
+            })
+            .buffer_unordered(CONCURRENT_REQUESTS);
+
+        let chapters = chapters
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(chapters)
+    }
+
+    pub async fn fetch_chapters_meta(&self, book_id: &str) -> Result<Vec<ChapterMeta>> {
         println!("Loading chapter information");
         let url = self
             .make_url(&format!("api/v1/book/{}/chapter", book_id))?
@@ -178,7 +210,7 @@ impl OreillyClient<Authenticated> {
             total_chapters, per_page, pages
         );
 
-        let bodies = stream::iter(2..=pages)
+        let pages = stream::iter(2..=pages)
             .map(|page| {
                 let client = &self.client;
                 let url = &url;
@@ -190,7 +222,7 @@ impl OreillyClient<Authenticated> {
             })
             .buffer_unordered(CONCURRENT_REQUESTS);
 
-        let rest_pages = bodies
+        let rest_pages = pages
             .collect::<Vec<_>>()
             .await
             .into_iter()
@@ -199,7 +231,14 @@ impl OreillyClient<Authenticated> {
         chapters.reserve_exact(total_chapters - per_page);
         chapters.extend(rest_pages.into_iter().flat_map(|r| r.results));
 
+        println!("Finished downloading chapter meta");
+    
         Ok(chapters)
+    }
+
+    pub async fn fetch_book_chapters(&self, book_id: &str) -> Result<Vec<Chapter>> {
+        let meta = self.fetch_chapters_meta(book_id).await?;
+        self.fetch_chapters_content(meta).await
     }
 
     pub async fn fetch_toc(&self, book_id: &str) -> Result<Vec<TocElement>> {
