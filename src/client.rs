@@ -170,7 +170,7 @@ impl OreillyClient<Authenticated> {
             .map(|meta| {
                 async move {
                     let content = self.download_text(meta.content_url.clone()).await?;
-                    Ok::<Chapter, OrlyError>(Chapter { meta, content })
+                    Chapter::new(meta, &content)
                 }
             })
             .buffer_unordered(CONCURRENT_REQUESTS);

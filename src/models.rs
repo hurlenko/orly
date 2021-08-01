@@ -1,7 +1,10 @@
+use crate::error::Result;
+use libxml::{parser::Parser, tree::Document};
 use reqwest::Url;
 use serde::{de::Error, Deserialize, Deserializer};
+use std::result::Result as StdResult;
 
-fn parse_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+fn parse_url<'de, D>(deserializer: D) -> StdResult<Url, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -9,7 +12,7 @@ where
     Url::parse(s).map_err(D::Error::custom)
 }
 
-fn parse_vec_url<'de, D>(deserializer: D) -> Result<Vec<Url>, D::Error>
+fn parse_vec_url<'de, D>(deserializer: D) -> StdResult<Vec<Url>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -34,8 +37,6 @@ pub(crate) struct Credentials {
     redirect_uri: String,
     uuid: String,
 }
-
-//
 
 #[derive(Deserialize, Debug)]
 pub struct Book {
@@ -80,11 +81,28 @@ pub struct ChapterMeta {
     // pub previous_chapter: ChapterNode,
 }
 
-
-#[derive(Deserialize, Debug)]
 pub struct Chapter {
-    pub meta: ChapterMeta,
-    pub content: String,
+    meta: ChapterMeta,
+    content: Document,
+}
+
+impl Chapter {
+    pub fn new(meta: ChapterMeta, content: &str) -> Result<Self> {
+        let parser: Parser = Parser::default_html();
+
+        Ok(Self {
+            meta,
+            content: parser.parse_string(content)?,
+        })
+    }
+
+    pub fn meta(&self) -> &ChapterMeta {
+        &self.meta
+    }
+
+    pub fn content(&self) -> &Document {
+        &self.content
+    }
 }
 
 #[derive(Deserialize, Debug)]

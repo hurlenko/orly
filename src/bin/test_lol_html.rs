@@ -1,10 +1,10 @@
-use crate::error::Result;
+use orly::error::Result;
 use anyhow::Context;
 use lol_html::{element, HtmlRewriter, Settings};
 use std::fs::File;
 use std::io::prelude::*;
 
-pub fn rewrite() -> Result<()> {
+pub fn main() -> Result<()> {
     let mut output = vec![];
 
     let mut rewriter = HtmlRewriter::new(
@@ -24,7 +24,7 @@ pub fn rewrite() -> Result<()> {
         |c: &[u8]| output.extend_from_slice(c),
     );
 
-    rewriter.write(include_bytes!("../test.html")).context("")?;
+    rewriter.write(include_bytes!("../../test.html")).context("")?;
     rewriter.end().context("")?;
     let mut file = File::create("test_res.html").context("context")?;
     // Write a slice of bytes to the file
