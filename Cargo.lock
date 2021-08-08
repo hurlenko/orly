@@ -789,6 +789,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "lazy_static",
  "libxml",
  "reqwest",
  "serde",

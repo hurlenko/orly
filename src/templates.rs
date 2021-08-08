@@ -1,9 +1,12 @@
-use askama::Template; // bring trait in scope
+use std::collections::HashSet;
+
+use askama::Template;
+use reqwest::Url; // bring trait in scope
 
 #[derive(Template)]
 #[template(path = "base.html")]
 pub struct BaseHtml<'a> {
-    pub styles: &'a str,
+    pub styles: &'a HashSet<Url>,
     pub body: &'a str,
     pub should_support_kindle: bool,
 }
@@ -11,3 +14,7 @@ pub struct BaseHtml<'a> {
 #[derive(Template)]
 #[template(path = "container.xml")]
 pub struct ContainerXml;
+
+#[derive(Template)]
+#[template(path = "ibooks.xml")]
+pub struct IbooksXml;

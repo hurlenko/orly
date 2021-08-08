@@ -82,28 +82,28 @@ pub struct ChapterMeta {
 }
 
 pub struct Chapter {
-    meta: ChapterMeta,
-    content: Document,
+    pub meta: ChapterMeta,
+    pub content: String,
 }
 
-impl Chapter {
-    pub fn new(meta: ChapterMeta, content: &str) -> Result<Self> {
-        let parser: Parser = Parser::default_html();
+// impl Chapter {
+//     pub fn new(meta: ChapterMeta, content: &str) -> Result<Self> {
+//         let parser: Parser = Parser::default_html();
 
-        Ok(Self {
-            meta,
-            content: parser.parse_string(content)?,
-        })
-    }
+//         Ok(Self {
+//             meta,
+//             content: parser.parse_string(content)?,
+//         })
+//     }
 
-    pub fn meta(&self) -> &ChapterMeta {
-        &self.meta
-    }
+//     pub fn meta(&self) -> &ChapterMeta {
+//         &self.meta
+//     }
 
-    pub fn content(&self) -> &Document {
-        &self.content
-    }
-}
+//     pub fn content(&self) -> &Document {
+//         &self.content
+//     }
+// }
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct ChaptersResponse {

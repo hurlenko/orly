@@ -8,7 +8,10 @@
   xmlns:epub="http://www.idpf.org/2007/ops"
 >
   <head>
-    {{styles}}
+    {%- for filename in styles -%}
+      <link href="styles/{{ filename }}" rel="stylesheet" type="text/css" />
+    {%- endfor -%}
+
     <style type="text/css">
       body {
         margin: 1em;
@@ -36,6 +39,6 @@
     </style>
   </head>
   <body>
-    {{body}}
+    {{ body|safe }}
   </body>
 </html>

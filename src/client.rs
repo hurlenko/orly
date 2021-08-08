@@ -167,11 +167,9 @@ impl OreillyClient<Authenticated> {
         println!("Fetching chapter content");
 
         let chapters = stream::iter(chapters_meta.into_iter())
-            .map(|meta| {
-                async move {
-                    let content = self.download_text(meta.content_url.clone()).await?;
-                    Chapter::new(meta, &content)
-                }
+            .map(|meta| async move {
+                let content = self.download_text(meta.content_url.clone()).await?;
+                Ok::<Chapter, OrlyError>(Chapter { meta, content })
             })
             .buffer_unordered(CONCURRENT_REQUESTS);
 
@@ -180,6 +178,8 @@ impl OreillyClient<Authenticated> {
             .await
             .into_iter()
             .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        println!("#chapters: {}", chapters.len());
 
         Ok(chapters)
     }
@@ -232,12 +232,13 @@ impl OreillyClient<Authenticated> {
         chapters.extend(rest_pages.into_iter().flat_map(|r| r.results));
 
         println!("Finished downloading chapter meta");
-    
+
         Ok(chapters)
     }
 
     pub async fn fetch_book_chapters(&self, book_id: &str) -> Result<Vec<Chapter>> {
         let meta = self.fetch_chapters_meta(book_id).await?;
+        println!("#meta: {}", meta.len());
         self.fetch_chapters_content(meta).await
     }
 
