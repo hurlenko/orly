@@ -1,12 +1,9 @@
-use std::collections::HashSet;
-
 use askama::Template;
-use reqwest::Url; // bring trait in scope
 
 #[derive(Template)]
 #[template(path = "base.html")]
 pub struct BaseHtml<'a> {
-    pub styles: &'a HashSet<Url>,
+    pub styles: &'a Vec<&'a String>,
     pub body: &'a str,
     pub should_support_kindle: bool,
 }

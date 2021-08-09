@@ -4,6 +4,8 @@ use std::io::Cursor;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
+use tokio::io::AsyncWrite;
+use tokio::io::AsyncWriteExt;
 
 use crate::error::Result;
 use anyhow::Context;
@@ -16,7 +18,7 @@ pub struct ZipArchive {
 
 impl fmt::Debug for ZipArchive {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ZipLibrary")
+        write!(f, "ZipArchive")
     }
 }
 
@@ -53,13 +55,14 @@ impl ZipArchive {
         Ok(())
     }
 
-    pub fn generate<W: Write>(&mut self, mut to: W) -> Result<()> {
+    pub async fn generate<W: AsyncWrite + std::marker::Unpin>(&mut self, mut to: W) -> Result<()> {
         let cursor = self
             .writer
             .finish()
             .with_context(|| "error writing zip file")?;
         let bytes = cursor.into_inner();
         to.write_all(bytes.as_ref())
+            .await
             .with_context(|| "error writing zip file")?;
         Ok(())
     }

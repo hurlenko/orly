@@ -1,7 +1,7 @@
 mod builder;
 mod zip;
 
-use std::fs::File;
+use tokio::fs::File;
 
 use anyhow::Context;
 
@@ -18,10 +18,12 @@ pub async fn build_epub(client: OreillyClient<Authenticated>, book_id: &str) -> 
     println!("Downloaded {} chapters", chapters.len());
 
     // Todo use tokio io;
-    let file = File::create("epub.zip").context("Unable to create file")?;
+    let file = File::create("epub.zip")
+        .await
+        .context("Unable to create file")?;
 
     let mut epub = EpubBuilder::new()?;
-    epub.chapters(chapters)?.generate(file)?;
+    epub.chapters(chapters)?.generate(file).await?;
 
     // parse_chapters(&client, chapters).await?;
 

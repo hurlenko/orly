@@ -89,13 +89,12 @@ pub struct EpubBuilder {
     // files: Vec<Content>,
     // metadata: Metadata,
     // toc: Toc,
-    stylesheets: HashSet<Url>,
+    stylesheets: HashMap<Url, String>,
     images: HashSet<Url>,
     parser: Parser,
 }
 
 impl EpubBuilder {
-    /// Create a new default EPUB Builder
     pub fn new() -> Result<Self> {
         let mut epub = EpubBuilder {
             zip: ZipArchive::new()?,
@@ -172,13 +171,22 @@ impl EpubBuilder {
                     .collect::<std::result::Result<Vec<Url>, _>>()
                     .context("Failed to join image url")?,
             );
-            self.stylesheets
-                .extend(chapter.meta.stylesheets.iter().map(|x| x.url.clone()));
-            self.stylesheets
-                .extend(chapter.meta.site_styles.iter().cloned());
+
+            for style in chapter
+                .meta
+                .stylesheets
+                .iter()
+                .map(|x| x.url.clone())
+                .chain(chapter.meta.site_styles.iter().cloned())
+            {
+                let count = self.stylesheets.len();
+                self.stylesheets
+                    .entry(style)
+                    .or_insert(format!("{}.css", count));
+            }
 
             let chapter_xhtml = BaseHtml {
-                styles: &self.stylesheets,
+                styles: &self.stylesheets.values().collect(),
                 body: &self.extract_chapter_content(&chapter.content)?,
                 should_support_kindle: true,
             };
@@ -278,7 +286,10 @@ impl EpubBuilder {
     //     Ok(self)
     // }
 
-    pub fn generate<W: io::Write>(&mut self, to: W) -> Result<()> {
+    pub async fn generate<W: tokio::io::AsyncWrite + std::marker::Unpin>(
+        &mut self,
+        to: W,
+    ) -> Result<()> {
         // If no styleesheet was provided, generate a dummy one
         // if !self.stylesheet {
         //     self.stylesheet(b"".as_ref())?;
@@ -298,7 +309,7 @@ impl EpubBuilder {
         //     self.zip.write_file("OEBPS/toc.xhtml", &*bytes)?;
         // }
 
-        self.zip.generate(to)?;
+        self.zip.generate(to).await?;
         Ok(())
     }
 
