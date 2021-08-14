@@ -1,26 +1,21 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
-use std::io;
+
+use std::ffi::OsStr;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use crate::epub::lxml::DocumentExt;
 use crate::error::{OrlyError, Result};
 use crate::models::Chapter;
 use crate::templates::{BaseHtml, ContainerXml, IbooksXml};
+
 use anyhow::Context;
 use askama::Template;
-use chrono;
-use libxml::bindings::{
-    xmlBufferContent, xmlBufferCreate, xmlBufferFree, xmlNodeDump, xmlSaveOption_XML_SAVE_AS_XML,
-};
-use libxml::parser::Parser;
-use libxml::readonly::RoNode;
-use libxml::tree::Document;
-use libxml::xpath::{Context as XpathContext, Object};
-use reqwest::Url;
 
-use std::ffi::CStr;
-use std::os::raw::c_char;
+use libxml::parser::Parser;
+use libxml::tree::SaveOptions;
+use reqwest::Url;
+use url::ParseError;
 
 use super::zip::ZipArchive;
 use lazy_static::lazy_static;
@@ -121,42 +116,95 @@ impl EpubBuilder {
         Ok(epub)
     }
 
-    pub fn ronode_to_string(&self, doc: &Document, node: &RoNode) -> String {
-        unsafe {
-            // allocate a buffer to dump into
-            let buf = xmlBufferCreate();
-
-            // dump the node
-            xmlNodeDump(
-                buf,
-                doc.doc_ptr(),
-                node.node_ptr(),
-                1,                                    // level of indentation
-                xmlSaveOption_XML_SAVE_AS_XML as i32, /* disable formatting */
-            );
-            let result = xmlBufferContent(buf);
-            let c_string = CStr::from_ptr(result as *const c_char);
-            let node_string = c_string.to_string_lossy().into_owned();
-            xmlBufferFree(buf);
-
-            node_string
+    fn rewrite_chapter_links<'a>(&self, old: &'a str) -> String {
+        if old.len() == 0 {
+            return old.to_string();
         }
+        // Url does not support relative urls, use dummy host to convert to absolute
+        // let mut abs_url = match Url::parse(old) {
+        //     Ok(url) => url,
+        //     Err(ParseError::RelativeUrlWithoutBase) => {
+        //         match Url::parse("https://example.net").and_then(|base| base.join(old)) {
+        //             Ok(url) => url,
+        //             _ => return old.to_string(),
+        //         }
+        //     }
+        //     _ => return old.to_string(),
+        // };
+        // For images and html create new path
+        let abs_url = match Url::parse(old) {
+            Err(ParseError::RelativeUrlWithoutBase) => {
+                match Url::parse("https://example.net").and_then(|base| base.join(old)) {
+                    Ok(url) => url,
+                    _ => return old.to_string(),
+                }
+            }
+            _ => return old.to_string(),
+        };
+
+        let path = match PathBuf::from(abs_url.path()).file_name().and_then(OsStr::to_str) {
+            Some(filename) => PathBuf::from(filename),
+            _ => return old.to_string(),
+        };
+
+        let new_path = match path.extension().and_then(OsStr::to_str) {
+            Some("png" | "jpg" | "jpeg" | "gif") => {
+                path.to_str().map(|filename| format!("images/{}", filename))
+            }
+            Some("html") => path.with_extension("xhtml").to_str().map(str::to_string),
+            _ => return old.to_string(),
+        };
+
+        // Replace path in abs_url and convert it back to relative
+        if let Some(mut new_path) = new_path {
+            if let Some(query) = abs_url.query() {
+                new_path.push_str("?");
+                new_path.push_str(query);
+            }
+            if let Some(fragment) = abs_url.fragment() {
+                new_path.push_str("#");
+                new_path.push_str(fragment);
+            }
+            return new_path;
+            // let mut base_url = abs_url.clone();
+            // base_url.set_path("");
+            // abs_url.set_path(&new_path);
+            // if let Some(new_url) = abs_url.make_relative(&base_url) {
+            //     return new_url;
+            // }
+        }
+        old.to_string()
     }
 
     fn extract_chapter_content(&self, chapter_body: &String) -> Result<String> {
         let document = self.parser.parse_string(chapter_body)?;
-        let context: XpathContext = XpathContext::new(&document)
-            .map_err(OrlyError::XpathError)
-            .context("Failed to create xpath context")?;
-        let result: Object = context
-            .evaluate("//div[@id='sbo-rt-content']")
-            .map_err(OrlyError::XpathError)
-            .context("Failed to evaluate xpath")?;
+        document.rewrite_links(|old| self.rewrite_chapter_links(old));
+        // for (node, attrs) in document.iterlinks() {
+        //     if attrs.len() > 0 {
+        //         println!(
+        //             "{:?} - {}",
+        //             attrs,
+        //             document.node_to_string_with_options(
+        //                 &node,
+        //                 SaveOptions {
+        //                     as_xml: true,
+        //                     ..Default::default()
+        //                 }
+        //             )
+        //         );
+        //     }
+        // }
 
-        let body = result.get_readonly_nodes_as_vec();
+        let body = document.xpath("//div[@id='sbo-rt-content']");
         assert_eq!(body.len(), 1);
 
-        Ok(self.ronode_to_string(&document, &body[0]))
+        Ok(document.node_to_string_with_options(
+            &body[0],
+            SaveOptions {
+                as_xml: true,
+                ..Default::default()
+            },
+        ))
     }
 
     pub fn chapters(&mut self, chapters: Vec<Chapter>) -> Result<&mut Self> {

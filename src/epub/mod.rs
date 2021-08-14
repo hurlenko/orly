@@ -1,5 +1,6 @@
 mod builder;
 mod zip;
+mod lxml;
 
 use tokio::fs::File;
 

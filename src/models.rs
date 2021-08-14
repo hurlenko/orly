@@ -1,5 +1,5 @@
-use crate::error::Result;
-use libxml::{parser::Parser, tree::Document};
+
+
 use reqwest::Url;
 use serde::{de::Error, Deserialize, Deserializer};
 use std::result::Result as StdResult;
