@@ -1,14 +1,16 @@
 mod builder;
-mod zip;
 mod lxml;
+mod zip;
 
 use tokio::fs::File;
 
 use anyhow::Context;
 
-use crate::client::{Authenticated, OreillyClient};
-use crate::epub::builder::EpubBuilder;
-use crate::error::Result;
+use crate::{
+    client::{Authenticated, OreillyClient},
+    epub::builder::EpubBuilder,
+    error::Result,
+};
 
 pub async fn build_epub(client: OreillyClient<Authenticated>, book_id: &str) -> Result<()> {
     let book = client.fetch_book_deails(book_id).await?;
@@ -22,9 +24,11 @@ pub async fn build_epub(client: OreillyClient<Authenticated>, book_id: &str) -> 
     let file = File::create("epub.zip")
         .await
         .context("Unable to create file")?;
+    let toc = client.fetch_toc(book_id).await?;
+    println!("Downloaded toc: {:?}", toc.len());
 
-    let mut epub = EpubBuilder::new()?;
-    epub.chapters(chapters)?.generate(file).await?;
+    let mut epub = EpubBuilder::new(&book)?;
+    epub.chapters(&chapters)?.toc(&toc)?.generate(file).await?;
 
     // parse_chapters(&client, chapters).await?;
 
@@ -32,8 +36,5 @@ pub async fn build_epub(client: OreillyClient<Authenticated>, book_id: &str) -> 
     //     println!("{} {}", idx, chapter.content_url);
     // }
 
-    // let toc = client.fetch_toc(book_id).await?;
-
-    // println!("Downloaded toc: {:?}", toc.len());
     Ok(())
 }

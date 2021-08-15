@@ -4,7 +4,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Local, Utc};
 use futures::stream::{self, StreamExt};
 
-use anyhow::{Context};
+use anyhow::Context;
 use reqwest::{
     header::{
         HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, UPGRADE_INSECURE_REQUESTS, USER_AGENT,

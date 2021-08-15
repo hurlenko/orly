@@ -1,16 +1,16 @@
-use std::fmt;
-use std::io;
-use std::io::Cursor;
-use std::io::Read;
-use std::io::Write;
-use std::path::Path;
-use tokio::io::AsyncWrite;
-use tokio::io::AsyncWriteExt;
+use std::{
+    fmt, io,
+    io::{Cursor, Read, Write},
+    path::Path,
+};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::error::Result;
 use anyhow::Context;
-use zip::write::{FileOptions, ZipWriter};
-use zip::CompressionMethod;
+use zip::{
+    write::{FileOptions, ZipWriter},
+    CompressionMethod,
+};
 
 pub struct ZipArchive {
     writer: ZipWriter<Cursor<Vec<u8>>>,

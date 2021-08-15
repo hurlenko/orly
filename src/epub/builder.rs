@@ -1,19 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
-use std::ffi::OsStr;
-use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::{ffi::OsStr, path::PathBuf};
 
-use crate::epub::lxml::DocumentExt;
-use crate::error::{OrlyError, Result};
-use crate::models::Chapter;
-use crate::templates::{BaseHtml, ContainerXml, IbooksXml};
+use crate::{
+    epub::lxml::DocumentExt,
+    error::Result,
+    models::{Book, Chapter, TocElement},
+    templates::{BaseHtml, ContainerXml, IbooksXml, NavPoint, Toc},
+};
 
 use anyhow::Context;
 use askama::Template;
 
-use libxml::parser::Parser;
-use libxml::tree::SaveOptions;
+use libxml::{parser::Parser, tree::SaveOptions};
 use reqwest::Url;
 use url::ParseError;
 
@@ -79,20 +78,24 @@ impl Content {
     }
 }
 
-pub struct EpubBuilder {
+pub struct EpubBuilder<'a> {
     zip: ZipArchive,
+    book: &'a Book,
     // files: Vec<Content>,
     // metadata: Metadata,
     // toc: Toc,
+    // Absolute url, final filename
     stylesheets: HashMap<Url, String>,
+    // Relative url from API, absolute url with asset_base_url, final filename
     images: HashSet<Url>,
     parser: Parser,
 }
 
-impl EpubBuilder {
-    pub fn new() -> Result<Self> {
+impl<'a> EpubBuilder<'a> {
+    pub fn new(book: &'a Book) -> Result<Self> {
         let mut epub = EpubBuilder {
             zip: ZipArchive::new()?,
+            book: book,
             stylesheets: Default::default(),
             images: Default::default(),
             parser: Parser::default_html(),
@@ -116,22 +119,8 @@ impl EpubBuilder {
         Ok(epub)
     }
 
-    fn rewrite_chapter_links<'a>(&self, old: &'a str) -> String {
-        if old.len() == 0 {
-            return old.to_string();
-        }
+    fn rewrite_chapter_links(&self, old: &str) -> String {
         // Url does not support relative urls, use dummy host to convert to absolute
-        // let mut abs_url = match Url::parse(old) {
-        //     Ok(url) => url,
-        //     Err(ParseError::RelativeUrlWithoutBase) => {
-        //         match Url::parse("https://example.net").and_then(|base| base.join(old)) {
-        //             Ok(url) => url,
-        //             _ => return old.to_string(),
-        //         }
-        //     }
-        //     _ => return old.to_string(),
-        // };
-        // For images and html create new path
         let abs_url = match Url::parse(old) {
             Err(ParseError::RelativeUrlWithoutBase) => {
                 match Url::parse("https://example.net").and_then(|base| base.join(old)) {
@@ -142,11 +131,15 @@ impl EpubBuilder {
             _ => return old.to_string(),
         };
 
-        let path = match PathBuf::from(abs_url.path()).file_name().and_then(OsStr::to_str) {
+        let path = match PathBuf::from(abs_url.path())
+            .file_name()
+            .and_then(OsStr::to_str)
+        {
             Some(filename) => PathBuf::from(filename),
             _ => return old.to_string(),
         };
 
+        // For images and html create a new path
         let new_path = match path.extension().and_then(OsStr::to_str) {
             Some("png" | "jpg" | "jpeg" | "gif") => {
                 path.to_str().map(|filename| format!("images/{}", filename))
@@ -155,7 +148,7 @@ impl EpubBuilder {
             _ => return old.to_string(),
         };
 
-        // Replace path in abs_url and convert it back to relative
+        // Append query params and fragmets, if any
         if let Some(mut new_path) = new_path {
             if let Some(query) = abs_url.query() {
                 new_path.push_str("?");
@@ -166,12 +159,6 @@ impl EpubBuilder {
                 new_path.push_str(fragment);
             }
             return new_path;
-            // let mut base_url = abs_url.clone();
-            // base_url.set_path("");
-            // abs_url.set_path(&new_path);
-            // if let Some(new_url) = abs_url.make_relative(&base_url) {
-            //     return new_url;
-            // }
         }
         old.to_string()
     }
@@ -207,8 +194,8 @@ impl EpubBuilder {
         ))
     }
 
-    pub fn chapters(&mut self, chapters: Vec<Chapter>) -> Result<&mut Self> {
-        for chapter in &chapters {
+    pub fn chapters(&mut self, chapters: &Vec<Chapter>) -> Result<&mut Self> {
+        for chapter in chapters {
             let base_url = &chapter.meta.asset_base_url;
             self.images.extend(
                 chapter
@@ -465,22 +452,62 @@ impl EpubBuilder {
     //     Ok(content)
     // }
 
-    // /// Render toc.ncx
-    // fn render_toc(&mut self) -> Result<Vec<u8>> {
-    //     let mut nav_points = String::new();
+    fn parse_navpoints<'b>(
+        elements: &'b Vec<TocElement>,
+        mut order: usize,
+        mut depth: usize,
+    ) -> (usize, Vec<NavPoint<'b>>) {
+        let navpoints = elements
+            .iter()
+            .map(|elem| {
+                order += 1;
+                let (child_depth, children) = Self::parse_navpoints(&elem.children, order, depth);
+                depth = depth.max(elem.depth).max(child_depth);
 
-    //     nav_points.push_str(&self.toc.render_epub());
+                NavPoint {
+                    id: if elem.fragment.is_empty() {
+                        &elem.id
+                    } else {
+                        &elem.fragment
+                    },
+                    order: order,
+                    children: children,
+                    label: &elem.label,
+                    url: &elem.href,
+                }
+            })
+            .collect();
 
-    //     let data = MapBuilder::new()
-    //         .insert_str("toc_name", self.metadata.toc_name.as_str())
-    //         .insert_str("nav_points", nav_points.as_str())
-    //         .build();
-    //     let mut res: Vec<u8> = vec![];
-    //     templates::TOC_NCX
-    //         .render_data(&mut res, &data)
-    //         .chain_err(|| "error rendering toc.ncx template")?;
-    //     Ok(res)
-    // }
+        (depth, navpoints)
+    }
+
+    // Render toc.ncx
+    pub fn toc(&mut self, toc: &Vec<TocElement>) -> Result<&mut Self> {
+        let (depth, navpoints) = Self::parse_navpoints(&toc, 0, 0);
+        self.zip.write_file(
+            OEBPS.as_path().join("toc.ncx"),
+            Toc {
+                uid: &self.book.isbn,
+                depth: depth,
+                pagecount: self.book.pagecount,
+                title: &self.book.title,
+                author: &self
+                    .book
+                    .authors
+                    .iter()
+                    .map(|a| &a.name)
+                    .cloned()
+                    .collect::<Vec<String>>()
+                    .join(", "),
+                navpoints: &navpoints,
+            }
+            .render()
+            .context("failed to render chapter xhtml")?
+            .as_bytes(),
+        )?;
+
+        Ok(self)
+    }
 
     // /// Render nav.xhtml
     // fn render_nav(&mut self, numbered: bool) -> Result<Vec<u8>> {

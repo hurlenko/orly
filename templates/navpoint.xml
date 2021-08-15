@@ -1,0 +1,9 @@
+<navPoint id="{{ id }}" playOrder="{{ order }}">
+    <navLabel>
+        <text>{{ label }}</text>
+    </navLabel>
+    <content src="{{ url }}"/>
+    {% for child in children %}
+        {{ child.render().unwrap()|safe }}
+    {% endfor -%}
+</navPoint>

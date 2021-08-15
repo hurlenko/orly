@@ -1,5 +1,3 @@
-
-
 use reqwest::Url;
 use serde::{de::Error, Deserialize, Deserializer};
 use std::result::Result as StdResult;
@@ -39,8 +37,13 @@ pub(crate) struct Credentials {
 }
 
 #[derive(Deserialize, Debug)]
+
+pub struct Author {
+    pub name: String,
+}
+#[derive(Deserialize, Debug)]
 pub struct Book {
-    // chapters: Vec<String>,
+    pub isbn: String,
     pub cover: String,
     pub chapter_list: String,
     pub toc: String,
@@ -48,6 +51,7 @@ pub struct Book {
     pub title: String,
     pub source: String,
     pub pagecount: usize,
+    pub authors: Vec<Author>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -86,25 +90,6 @@ pub struct Chapter {
     pub content: String,
 }
 
-// impl Chapter {
-//     pub fn new(meta: ChapterMeta, content: &str) -> Result<Self> {
-//         let parser: Parser = Parser::default_html();
-
-//         Ok(Self {
-//             meta,
-//             content: parser.parse_string(content)?,
-//         })
-//     }
-
-//     pub fn meta(&self) -> &ChapterMeta {
-//         &self.meta
-//     }
-
-//     pub fn content(&self) -> &Document {
-//         &self.content
-//     }
-// }
-
 #[derive(Deserialize, Debug)]
 pub(crate) struct ChaptersResponse {
     pub count: usize,
@@ -126,5 +111,5 @@ pub struct TocElement {
     pub href: String,
     pub id: String,
     pub media_type: String,
-    pub children: Vec<Box<TocElement>>,
+    pub children: Vec<TocElement>,
 }

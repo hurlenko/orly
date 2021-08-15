@@ -1,9 +1,10 @@
-use libxml::bindings::{xmlBufferContent, xmlBufferCreate, xmlBufferFree, xmlNodeDump, xmlNodePtr};
-use libxml::readonly::RoNode;
-use libxml::tree::{Document, Node, SaveOptions};
-use libxml::xpath::{Context as XpathContext, Object};
-use std::ffi::CStr;
-use std::os::raw::c_char;
+use libxml::{
+    bindings::{xmlBufferContent, xmlBufferCreate, xmlBufferFree, xmlNodeDump, xmlNodePtr},
+    readonly::RoNode,
+    tree::{Document, Node, SaveOptions},
+    xpath::{Context as XpathContext, Object},
+};
+use std::{ffi::CStr, os::raw::c_char};
 
 pub(crate) trait NodeType {
     fn node_ptr(&self) -> xmlNodePtr;
@@ -92,9 +93,9 @@ pub(crate) trait DocumentExt {
             for attr in attrs {
                 if let Some(curr_url) = node.get_attribute(&attr) {
                     let new_url = link_repl_func(&curr_url);
-                    if new_url != curr_url {
-                        println!("Old: {}\nNew: {}\n", curr_url, new_url);
-                    }
+                    // if new_url != curr_url {
+                    //     println!("Old: {}\nNew: {}\n", curr_url, new_url);
+                    // }
                     if !node.set_attribute(&attr, &new_url).is_ok() {
                         println!("Failed to set node attr {}", attr);
                     }
