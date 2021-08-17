@@ -79,8 +79,7 @@ pub(crate) trait DocumentExt {
                 let found = link_attrs
                     .iter()
                     .filter_map(|attr| {
-                        node.get_attribute(attr)
-                            .and_then(|_| Some(attr.to_string()))
+                        node.get_attribute(attr).map(|_| attr.to_string())
                     })
                     .collect();
                 (node, found)
@@ -96,7 +95,7 @@ pub(crate) trait DocumentExt {
                     // if new_url != curr_url {
                     //     println!("Old: {}\nNew: {}\n", curr_url, new_url);
                     // }
-                    if !node.set_attribute(&attr, &new_url).is_ok() {
+                    if node.set_attribute(&attr, &new_url).is_err() {
                         println!("Failed to set node attr {}", attr);
                     }
                 }

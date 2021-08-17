@@ -47,8 +47,8 @@ impl<S: AuthState> OreillyClient<S> {
     }
 }
 
-impl OreillyClient<Unauthenticated> {
-    pub fn new() -> Self {
+impl Default for OreillyClient<Unauthenticated> {
+    fn default() -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static("application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"));
         headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate"));
@@ -65,6 +65,12 @@ impl OreillyClient<Unauthenticated> {
                 .expect("correct base url"),
             marker: std::marker::PhantomData,
         }
+    }
+}
+
+impl OreillyClient<Unauthenticated> {
+    pub fn new() -> Self {
+        Default::default()
     }
 
     async fn check_login(&self) -> Result<()> {
@@ -111,14 +117,11 @@ impl OreillyClient<Unauthenticated> {
             .send()
             .await?;
 
-        match response.error_for_status_ref() {
-            Err(err) => {
-                return Err(OrlyError::AuthenticationFailed(format!(
-                    "Login request failed, make sure your email and password are correct: {}",
-                    err.to_string()
-                )))
-            }
-            _ => (),
+        if let Err(err) = response.error_for_status_ref() {
+            return Err(OrlyError::AuthenticationFailed(format!(
+                "Login request failed, make sure your email and password are correct: {}",
+                err.to_string()
+            )));
         }
 
         let credentials = response.json::<Credentials>().await?;

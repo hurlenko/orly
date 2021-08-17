@@ -37,7 +37,6 @@ pub(crate) struct Credentials {
 }
 
 #[derive(Deserialize, Debug)]
-
 pub struct Author {
     pub name: String,
 }

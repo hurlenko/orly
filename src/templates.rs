@@ -22,7 +22,7 @@ pub struct NavPoint<'a> {
     pub id: &'a str,
     pub order: usize,
     pub label: &'a str,
-    pub url: &'a str,
+    pub url: String,
     pub children: Vec<NavPoint<'a>>,
 }
 

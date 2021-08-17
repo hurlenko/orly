@@ -19,63 +19,10 @@ use url::ParseError;
 use super::zip::ZipArchive;
 use lazy_static::lazy_static;
 
+const XHTML: &str = "xhtml";
+
 lazy_static! {
     static ref OEBPS: PathBuf = PathBuf::from("OEBPS");
-}
-
-#[derive(Debug)]
-struct Metadata {
-    pub title: String,
-    pub author: String,
-    pub lang: String,
-    pub generator: String,
-    pub toc_name: String,
-    pub description: Option<String>,
-    pub subject: Option<String>,
-    pub license: Option<String>,
-}
-
-impl Metadata {
-    pub fn new() -> Metadata {
-        Metadata {
-            title: String::new(),
-            author: String::new(),
-            lang: String::from("en"),
-            generator: String::from("Rust EPUB library"),
-            toc_name: String::from("Table Of Contents"),
-            description: None,
-            subject: None,
-            license: None,
-        }
-    }
-}
-
-/// A file added in the EPUB
-#[derive(Debug)]
-struct Content {
-    pub file: String,
-    pub mime: String,
-    pub itemref: bool,
-    pub cover: bool,
-    // pub reftype: Option<ReferenceType>,
-    pub title: String,
-}
-
-impl Content {
-    pub fn new<S1, S2>(file: S1, mime: S2) -> Content
-    where
-        S1: Into<String>,
-        S2: Into<String>,
-    {
-        Content {
-            file: file.into(),
-            mime: mime.into(),
-            itemref: false,
-            cover: false,
-            // reftype: None,
-            title: String::new(),
-        }
-    }
 }
 
 pub struct EpubBuilder<'a> {
@@ -87,7 +34,7 @@ pub struct EpubBuilder<'a> {
     // Absolute url, final filename
     stylesheets: HashMap<Url, String>,
     // Relative url from API, absolute url with asset_base_url, final filename
-    images: HashSet<Url>,
+    images: HashMap<Url, String>,
     parser: Parser,
 }
 
@@ -95,7 +42,7 @@ impl<'a> EpubBuilder<'a> {
     pub fn new(book: &'a Book) -> Result<Self> {
         let mut epub = EpubBuilder {
             zip: ZipArchive::new()?,
-            book: book,
+            book,
             stylesheets: Default::default(),
             images: Default::default(),
             parser: Parser::default_html(),
@@ -144,18 +91,18 @@ impl<'a> EpubBuilder<'a> {
             Some("png" | "jpg" | "jpeg" | "gif") => {
                 path.to_str().map(|filename| format!("images/{}", filename))
             }
-            Some("html") => path.with_extension("xhtml").to_str().map(str::to_string),
+            Some("html") => path.with_extension(XHTML).to_str().map(str::to_string),
             _ => return old.to_string(),
         };
 
         // Append query params and fragmets, if any
         if let Some(mut new_path) = new_path {
             if let Some(query) = abs_url.query() {
-                new_path.push_str("?");
+                new_path.push('?');
                 new_path.push_str(query);
             }
             if let Some(fragment) = abs_url.fragment() {
-                new_path.push_str("#");
+                new_path.push('#');
                 new_path.push_str(fragment);
             }
             return new_path;
@@ -163,7 +110,7 @@ impl<'a> EpubBuilder<'a> {
         old.to_string()
     }
 
-    fn extract_chapter_content(&self, chapter_body: &String) -> Result<String> {
+    fn extract_chapter_content(&self, chapter_body: &str) -> Result<String> {
         let document = self.parser.parse_string(chapter_body)?;
         document.rewrite_links(|old| self.rewrite_chapter_links(old));
         // for (node, attrs) in document.iterlinks() {
@@ -194,18 +141,24 @@ impl<'a> EpubBuilder<'a> {
         ))
     }
 
-    pub fn chapters(&mut self, chapters: &Vec<Chapter>) -> Result<&mut Self> {
+    pub fn chapters(&mut self, chapters: &[Chapter]) -> Result<&mut Self> {
         for chapter in chapters {
             let base_url = &chapter.meta.asset_base_url;
-            self.images.extend(
-                chapter
-                    .meta
-                    .images
-                    .iter()
-                    .map(|x| base_url.join(x))
-                    .collect::<std::result::Result<Vec<Url>, _>>()
-                    .context("Failed to join image url")?,
-            );
+            let image_urls = chapter
+                .meta
+                .images
+                .iter()
+                .map(|x| {
+                    base_url.join(x).ok().and_then(|url| {
+                        PathBuf::from(url.path())
+                            .file_name()
+                            .and_then(OsStr::to_str)
+                            .map(|filename| (url, filename.to_string()))
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .context("Failed to join image url")?;
+            self.images.extend(image_urls);
 
             for style in chapter
                 .meta
@@ -229,7 +182,7 @@ impl<'a> EpubBuilder<'a> {
             let filename = OEBPS
                 .as_path()
                 .join(&chapter.meta.filename)
-                .with_extension("xhtml");
+                .with_extension(XHTML);
 
             self.zip.write_file(
                 filename,
@@ -343,6 +296,10 @@ impl<'a> EpubBuilder<'a> {
         //     let bytes = self.render_nav(false)?;
         //     self.zip.write_file("OEBPS/toc.xhtml", &*bytes)?;
         // }
+        // Unique urls != unique filenames
+        let images_count = self.images.len();
+        let unique_images = self.images.values().collect::<HashSet<&String>>().len();
+        assert_eq!(images_count, unique_images);
 
         self.zip.generate(to).await?;
         Ok(())
@@ -452,11 +409,11 @@ impl<'a> EpubBuilder<'a> {
     //     Ok(content)
     // }
 
-    fn parse_navpoints<'b>(
-        elements: &'b Vec<TocElement>,
+    fn parse_navpoints(
+        elements: &[TocElement],
         mut order: usize,
         mut depth: usize,
-    ) -> (usize, Vec<NavPoint<'b>>) {
+    ) -> (usize, Vec<NavPoint>) {
         let navpoints = elements
             .iter()
             .map(|elem| {
@@ -470,10 +427,10 @@ impl<'a> EpubBuilder<'a> {
                     } else {
                         &elem.fragment
                     },
-                    order: order,
-                    children: children,
+                    order,
+                    children,
                     label: &elem.label,
-                    url: &elem.href,
+                    url: elem.href.replace(".html", &format!(".{}", XHTML)),
                 }
             })
             .collect();
@@ -482,13 +439,13 @@ impl<'a> EpubBuilder<'a> {
     }
 
     // Render toc.ncx
-    pub fn toc(&mut self, toc: &Vec<TocElement>) -> Result<&mut Self> {
-        let (depth, navpoints) = Self::parse_navpoints(&toc, 0, 0);
+    pub fn toc(&mut self, toc: &[TocElement]) -> Result<&mut Self> {
+        let (depth, navpoints) = Self::parse_navpoints(toc, 0, 0);
         self.zip.write_file(
             OEBPS.as_path().join("toc.ncx"),
             Toc {
                 uid: &self.book.isbn,
-                depth: depth,
+                depth,
                 pagecount: self.book.pagecount,
                 title: &self.book.title,
                 author: &self
