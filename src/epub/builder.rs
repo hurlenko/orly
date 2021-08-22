@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use std::{ffi::OsStr, path::PathBuf};
 
+use crate::templates::ContentOpf;
 use crate::{
     epub::lxml::DocumentExt,
     error::Result,
@@ -20,6 +21,8 @@ use super::zip::ZipArchive;
 use lazy_static::lazy_static;
 
 const XHTML: &str = "xhtml";
+const IMAGES: &str = "images";
+const STYLES: &str = "styles";
 
 lazy_static! {
     static ref OEBPS: PathBuf = PathBuf::from("OEBPS");
@@ -28,14 +31,12 @@ lazy_static! {
 pub struct EpubBuilder<'a> {
     zip: ZipArchive,
     book: &'a Book,
-    // files: Vec<Content>,
-    // metadata: Metadata,
-    // toc: Toc,
-    // Absolute url, final filename
     stylesheets: HashMap<Url, String>,
-    // Relative url from API, absolute url with asset_base_url, final filename
     images: HashMap<Url, String>,
     parser: Parser,
+    chapter_names: Vec<&'a str>,
+    // image name
+    cover: String,
 }
 
 impl<'a> EpubBuilder<'a> {
@@ -43,9 +44,11 @@ impl<'a> EpubBuilder<'a> {
         let mut epub = EpubBuilder {
             zip: ZipArchive::new()?,
             book,
+            parser: Parser::default_html(),
             stylesheets: Default::default(),
             images: Default::default(),
-            parser: Parser::default_html(),
+            chapter_names: Default::default(),
+            cover: Default::default(),
         };
 
         epub.zip.write_file(
@@ -88,9 +91,9 @@ impl<'a> EpubBuilder<'a> {
 
         // For images and html create a new path
         let new_path = match path.extension().and_then(OsStr::to_str) {
-            Some("png" | "jpg" | "jpeg" | "gif") => {
-                path.to_str().map(|filename| format!("images/{}", filename))
-            }
+            Some("png" | "jpg" | "jpeg" | "gif") => path
+                .to_str()
+                .map(|filename| format!("{}/{}", IMAGES, filename)),
             Some("html") => path.with_extension(XHTML).to_str().map(str::to_string),
             _ => return old.to_string(),
         };
@@ -141,56 +144,81 @@ impl<'a> EpubBuilder<'a> {
         ))
     }
 
-    pub fn chapters(&mut self, chapters: &[Chapter]) -> Result<&mut Self> {
-        for chapter in chapters {
-            let base_url = &chapter.meta.asset_base_url;
-            let image_urls = chapter
-                .meta
-                .images
-                .iter()
-                .map(|x| {
-                    base_url.join(x).ok().and_then(|url| {
-                        PathBuf::from(url.path())
-                            .file_name()
-                            .and_then(OsStr::to_str)
-                            .map(|filename| (url, filename.to_string()))
-                    })
-                })
-                .collect::<Option<Vec<_>>>()
-                .context("Failed to join image url")?;
-            self.images.extend(image_urls);
+    fn extract_images(&self, chapter: &Chapter) -> Result<Vec<(Url, String)>> {
+        let base_url = &chapter.meta.asset_base_url;
 
-            for style in chapter
-                .meta
-                .stylesheets
-                .iter()
-                .map(|x| x.url.clone())
-                .chain(chapter.meta.site_styles.iter().cloned())
+        let image_urls = chapter
+            .meta
+            .images
+            .iter()
+            .map(|x| {
+                base_url.join(x).ok().and_then(|url| {
+                    PathBuf::from(url.path())
+                        .file_name()
+                        .and_then(OsStr::to_str)
+                        .map(|filename| (url, filename.to_string()))
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+            .context("Failed to join image url")?;
+
+        Ok(image_urls)
+    }
+
+    fn extract_styles(&mut self, chapter: &Chapter) -> Result<()> {
+        for style in chapter
+            .meta
+            .stylesheets
+            .iter()
+            .map(|x| x.url.clone())
+            .chain(chapter.meta.site_styles.iter().cloned())
+        {
+            let count = self.stylesheets.len();
+            self.stylesheets
+                .entry(style)
+                .or_insert(format!("{}.css", count));
+        }
+
+        Ok(())
+    }
+
+    fn add_chapter(&mut self, chapter: &Chapter) -> Result<()> {
+        let chapter_xhtml = BaseHtml {
+            styles_dir: STYLES,
+            styles: &self.stylesheets.values().collect(),
+            body: &self.extract_chapter_content(&chapter.content)?,
+            should_support_kindle: true,
+        };
+
+        let filename = OEBPS.as_path().join(&chapter.meta.filename);
+
+        self.zip.write_file(
+            filename,
+            chapter_xhtml
+                .render()
+                .context("failed to render chapter xhtml")?
+                .as_bytes(),
+        )?;
+        Ok(())
+    }
+
+    pub fn chapters(&mut self, chapters: &'a [Chapter]) -> Result<&mut Self> {
+        for chapter in chapters {
+            let images = self.extract_images(chapter)?;
+
+            if chapter.meta.filename.to_lowercase().contains("cover")
+                || chapter.meta.title.to_lowercase().contains("cover")
             {
-                let count = self.stylesheets.len();
-                self.stylesheets
-                    .entry(style)
-                    .or_insert(format!("{}.css", count));
+                assert_eq!(images.len(), 1);
+                self.cover = images[0].1.clone();
             }
 
-            let chapter_xhtml = BaseHtml {
-                styles: &self.stylesheets.values().collect(),
-                body: &self.extract_chapter_content(&chapter.content)?,
-                should_support_kindle: true,
-            };
+            self.images.extend(images);
+            self.extract_styles(chapter)?;
 
-            let filename = OEBPS
-                .as_path()
-                .join(&chapter.meta.filename)
-                .with_extension(XHTML);
+            self.chapter_names.push(&chapter.meta.filename);
 
-            self.zip.write_file(
-                filename,
-                chapter_xhtml
-                    .render()
-                    .context("failed to render chapter xhtml")?
-                    .as_bytes(),
-            )?;
+            self.add_chapter(chapter)?;
         }
 
         println!("Found {} images", self.images.len());
@@ -198,216 +226,74 @@ impl<'a> EpubBuilder<'a> {
         Ok(self)
     }
 
-    // pub fn metadata<S1, S2>(&mut self, key: S1, value: S2) -> &mut Self
-    // where
-    //     S1: AsRef<str>,
-    //     S2: Into<String>,
-    // {
-    //     match key.as_ref() {
-    //         "author" => self.metadata.author = value.into(),
-    //         "title" => self.metadata.title = value.into(),
-    //         "lang" => self.metadata.lang = value.into(),
-    //         "generator" => self.metadata.generator = value.into(),
-    //         "description" => self.metadata.description = Some(value.into()),
-    //         "subject" => self.metadata.subject = Some(value.into()),
-    //         "license" => self.metadata.license = Some(value.into()),
-    //         "toc_name" => self.metadata.toc_name = value.into(),
-    //         s => unreachable!("invalid metadata '{}'", s),
-    //     }
-    //     self
-    // }
-
-    // pub fn stylesheet<R: Read>(&mut self, content: R) -> Result<&mut Self> {
-    //     self.add_resource("stylesheet.css", content, "text/css")?;
-    //     self.stylesheet = true;
-    //     Ok(self)
-    // }
-
-    // pub fn inline_toc(&mut self) -> &mut Self {
-    //     self.inline_toc = true;
-    //     self.toc.add(TocElement::new(
-    //         "toc.xhtml",
-    //         self.metadata.toc_name.as_str(),
-    //     ));
-    //     let mut file = Content::new("toc.xhtml", "application/xhtml+xml");
-    //     file.reftype = Some(ReferenceType::Toc);
-    //     file.title = self.metadata.toc_name.clone();
-    //     file.itemref = true;
-    //     self.files.push(file);
-    //     self
-    // }
-
-    // pub fn add_cover_image<R, P, S>(
-    //     &mut self,
-    //     path: P,
-    //     content: R,
-    //     mime_type: S,
-    // ) -> Result<&mut Self>
-    // where
-    //     R: Read,
-    //     P: AsRef<Path>,
-    //     S: Into<String>,
-    // {
-    //     self.zip
-    //         .write_file(Path::new("OEBPS").join(path.as_ref()), content)?;
-    //     let mut file = Content::new(format!("{}", path.as_ref().display()), mime_type);
-    //     file.cover = true;
-    //     self.files.push(file);
-    //     Ok(self)
-    // }
-
-    // pub fn add_content<R: Read>(&mut self, content: EpubContent<R>) -> Result<&mut Self> {
-    //     self.zip.write_file(
-    //         Path::new("OEBPS").join(content.toc.url.as_str()),
-    //         content.content,
-    //     )?;
-    //     let mut file = Content::new(content.toc.url.as_str(), "application/xhtml+xml");
-    //     file.itemref = true;
-    //     file.reftype = content.reftype;
-    //     if file.reftype.is_some() {
-    //         file.title = content.toc.title.clone();
-    //     }
-    //     self.files.push(file);
-    //     if !content.toc.title.is_empty() {
-    //         self.toc.add(content.toc);
-    //     }
-    //     Ok(self)
-    // }
-
     pub async fn generate<W: tokio::io::AsyncWrite + std::marker::Unpin>(
         &mut self,
         to: W,
     ) -> Result<()> {
-        // If no styleesheet was provided, generate a dummy one
-        // if !self.stylesheet {
-        //     self.stylesheet(b"".as_ref())?;
-        // }
-        // // Render content.opf
-        // let bytes = self.render_opf()?;
-        // self.zip.write_file("OEBPS/content.opf", &*bytes)?;
-        // // Render toc.ncx
-        // let bytes = self.render_toc()?;
-        // self.zip.write_file("OEBPS/toc.ncx", &*bytes)?;
-        // // Render nav.xhtml
-        // let bytes = self.render_nav(true)?;
-        // self.zip.write_file("OEBPS/nav.xhtml", &*bytes)?;
-        // // Write inline toc if it needs to
-        // if self.inline_toc {
-        //     let bytes = self.render_nav(false)?;
-        //     self.zip.write_file("OEBPS/toc.xhtml", &*bytes)?;
-        // }
         // Unique urls != unique filenames
         let images_count = self.images.len();
         let unique_images = self.images.values().collect::<HashSet<&String>>().len();
         assert_eq!(images_count, unique_images);
 
-        self.zip.generate(to).await?;
+        self.render_opf()?.zip.generate(to).await?;
         Ok(())
     }
 
-    // /// Render content.opf file
-    // fn render_opf(&mut self) -> Result<Vec<u8>> {
-    //     let mut optional = String::new();
-    //     if let Some(ref desc) = self.metadata.description {
-    //         write!(optional, "<dc:description>{}</dc:description>\n", desc)?;
-    //     }
-    //     if let Some(ref subject) = self.metadata.subject {
-    //         write!(optional, "<dc:subject>{}</dc:subject>\n", subject)?;
-    //     }
-    //     if let Some(ref rights) = self.metadata.license {
-    //         write!(optional, "<dc:rights>{}</dc:rights>\n", rights)?;
-    //     }
-    //     let date = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-    //     let uuid = uuid::adapter::Urn::from_uuid(uuid::Uuid::new_v4()).to_string();
+    /// Render content.opf file
+    fn render_opf(&mut self) -> Result<&mut Self> {
+        let images_mime: Vec<(&String, String)> = self
+            .images
+            .iter()
+            .map(|(_, f)| {
+                (
+                    f,
+                    match PathBuf::from(f).extension().and_then(OsStr::to_str) {
+                        Some(ext) if ext.starts_with("jp") => "jpeg",
+                        Some(ext) => ext,
+                        None => "png",
+                    }
+                    .to_string(),
+                )
+            })
+            .collect();
 
-    //     let mut items = String::new();
-    //     let mut itemrefs = String::new();
-    //     let mut guide = String::new();
+        let content_opf = ContentOpf {
+            title: &self.book.title,
+            description: &self.book.description,
+            publishers: &self
+                .book
+                .publishers
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<String>>()
+                .join(", "),
+            rights: &self.book.rights,
+            issued: &self.book.issued,
+            language: &self.book.language,
+            isbn: &self.book.isbn,
+            cover_image: &self.cover,
+            authors: &self.book.authors,
+            subjects: &self.book.subjects,
+            styles: &self.stylesheets.values().collect(),
+            chapters: &self.chapter_names,
+            images: &images_mime
+                .iter()
+                .map(|(a, b)| (a.as_str(), b.as_str()))
+                .collect(),
+            styles_dir: STYLES,
+            images_dir: IMAGES,
+        };
 
-    //     for content in &self.files {
-    //         let id = if content.cover {
-    //             String::from("cover-image")
-    //         } else {
-    //             to_id(&content.file)
-    //         };
-    //         let properties = match (self.version, content.cover) {
-    //             (EpubVersion::V30, true) => "properties=\"cover-image\"",
-    //             _ => "",
-    //         };
-    //         if content.cover {
-    //             write!(
-    //                 optional,
-    //                 "<meta name=\"cover\" content=\"cover-image\" />\n"
-    //             )?;
-    //         }
-    //         write!(
-    //             items,
-    //             "<item media-type=\"{mime}\" {properties} \
-    //                 id=\"{id}\" href=\"{href}\" />\n",
-    //             properties = properties,
-    //             mime = content.mime,
-    //             id = id,
-    //             href = content.file
-    //         )?;
-    //         if content.itemref {
-    //             write!(itemrefs, "<itemref idref=\"{id}\" />\n", id = id)?;
-    //         }
-    //         if let Some(reftype) = content.reftype {
-    //             use epub_content::ReferenceType::*;
-    //             let reftype = match reftype {
-    //                 Cover => "cover",
-    //                 TitlePage => "title-page",
-    //                 Toc => "toc",
-    //                 Index => "index",
-    //                 Glossary => "glossary",
-    //                 Acknowledgements => "acknowledgements",
-    //                 Bibliography => "bibliography",
-    //                 Colophon => "colophon",
-    //                 Copyright => "copyright",
-    //                 Dedication => "dedication",
-    //                 Epigraph => "epigraph",
-    //                 Foreword => "foreword",
-    //                 Loi => "loi",
-    //                 Lot => "lot",
-    //                 Notes => "notes",
-    //                 Preface => "preface",
-    //                 Text => "text",
-    //             };
-    //             write!(
-    //                 guide,
-    //                 "<reference type=\"{reftype}\" title=\"{title}\" href=\"{href}\" />\n",
-    //                 reftype = reftype,
-    //                 title = common::escape_quote(content.title.as_str()),
-    //                 href = content.file
-    //             )?;
-    //         }
-    //     }
+        self.zip.write_file(
+            OEBPS.as_path().join("content.opf"),
+            content_opf
+                .render()
+                .context("failed to render content.opf")?
+                .as_bytes(),
+        )?;
 
-    //     let data = MapBuilder::new()
-    //         .insert_str("lang", self.metadata.lang.as_str())
-    //         .insert_str("author", self.metadata.author.as_str())
-    //         .insert_str("title", self.metadata.title.as_str())
-    //         .insert_str("generator", self.metadata.generator.as_str())
-    //         .insert_str("toc_name", self.metadata.toc_name.as_str())
-    //         .insert_str("optional", optional)
-    //         .insert_str("items", items)
-    //         .insert_str("itemrefs", itemrefs)
-    //         .insert_str("date", date.to_string())
-    //         .insert_str("uuid", uuid)
-    //         .insert_str("guide", guide)
-    //         .build();
-
-    //     let mut content = vec![];
-    //     let res = match self.version {
-    //         EpubVersion::V20 => templates::v2::CONTENT_OPF.render_data(&mut content, &data),
-    //         EpubVersion::V30 => templates::v3::CONTENT_OPF.render_data(&mut content, &data),
-    //         EpubVersion::__NonExhaustive => unreachable!(),
-    //     };
-
-    //     res.chain_err(|| "could not render template for content.opf")?;
-
-    //     Ok(content)
-    // }
+        Ok(self)
+    }
 
     fn parse_navpoints(
         elements: &[TocElement],
@@ -430,7 +316,7 @@ impl<'a> EpubBuilder<'a> {
                     order,
                     children,
                     label: &elem.label,
-                    url: elem.href.replace(".html", &format!(".{}", XHTML)),
+                    url: &elem.href,
                 }
             })
             .collect();
@@ -465,66 +351,4 @@ impl<'a> EpubBuilder<'a> {
 
         Ok(self)
     }
-
-    // /// Render nav.xhtml
-    // fn render_nav(&mut self, numbered: bool) -> Result<Vec<u8>> {
-    //     let content = self.toc.render(numbered);
-    //     let mut landmarks = String::new();
-    //     if self.version > EpubVersion::V20 {
-    //         for file in &self.files {
-    //             if let Some(ref reftype) = file.reftype {
-    //                 use ReferenceType::*;
-    //                 let reftype = match *reftype {
-    //                     Cover => "cover",
-    //                     Text => "bodymatter",
-    //                     Toc => "toc",
-    //                     Bibliography => "bibliography",
-    //                     Epigraph => "epigraph",
-    //                     Foreword => "foreword",
-    //                     Preface => "preface",
-    //                     Notes => "endnotes",
-    //                     Loi => "loi",
-    //                     Lot => "lot",
-    //                     Colophon => "colophon",
-    //                     TitlePage => "titlepage",
-    //                     Index => "index",
-    //                     Glossary => "glossary",
-    //                     Copyright => "copyright-page",
-    //                     Acknowledgements => "acknowledgements",
-    //                     Dedication => "dedication",
-    //                 };
-    //                 if !file.title.is_empty() {
-    //                     write!(
-    //                         landmarks,
-    //                         "<li><a epub:type=\"{reftype}\" href=\"{href}\">\
-    //                             {title}</a></li>\n",
-    //                         reftype = reftype,
-    //                         href = file.file,
-    //                         title = file.title
-    //                     )?;
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     if !landmarks.is_empty() {
-    //         landmarks = format!("<ol>\n{}\n</ol>", landmarks);
-    //     }
-
-    //     let data = MapBuilder::new()
-    //         .insert_str("content", content)
-    //         .insert_str("toc_name", self.metadata.toc_name.as_str())
-    //         .insert_str("generator", self.metadata.generator.as_str())
-    //         .insert_str("landmarks", landmarks)
-    //         .build();
-
-    //     let mut res = vec![];
-    //     let eh = match self.version {
-    //         EpubVersion::V20 => templates::v2::NAV_XHTML.render_data(&mut res, &data),
-    //         EpubVersion::V30 => templates::v3::NAV_XHTML.render_data(&mut res, &data),
-    //         EpubVersion::__NonExhaustive => unreachable!(),
-    //     };
-
-    //     eh.chain_err(|| "error rendering nav.xhtml template")?;
-    //     Ok(res)
-    // }
 }

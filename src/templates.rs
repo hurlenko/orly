@@ -1,8 +1,17 @@
 use askama::Template;
 
+use crate::models::{Author, Subject};
+
+mod filters {
+    pub fn to_id(s: &str) -> ::askama::Result<String> {
+        Ok(s.replace(".", "_").replace("/", "_"))
+    }
+}
+
 #[derive(Template)]
 #[template(path = "base.xhtml", escape = "xml")]
 pub struct BaseHtml<'a> {
+    pub styles_dir: &'a str,
     pub styles: &'a Vec<&'a String>,
     pub body: &'a str,
     pub should_support_kindle: bool,
@@ -22,7 +31,7 @@ pub struct NavPoint<'a> {
     pub id: &'a str,
     pub order: usize,
     pub label: &'a str,
-    pub url: String,
+    pub url: &'a str,
     pub children: Vec<NavPoint<'a>>,
 }
 
@@ -35,4 +44,24 @@ pub struct Toc<'a> {
     pub title: &'a str,
     pub author: &'a str,
     pub navpoints: &'a Vec<NavPoint<'a>>,
+}
+
+#[derive(Template)]
+#[template(path = "content.xml")]
+pub struct ContentOpf<'a> {
+    pub title: &'a str,
+    pub description: &'a str,
+    pub publishers: &'a str,
+    pub rights: &'a str,
+    pub issued: &'a str,
+    pub language: &'a str,
+    pub isbn: &'a str,
+    pub cover_image: &'a str,
+    pub authors: &'a Vec<Author>,
+    pub subjects: &'a Vec<Subject>,
+    pub styles: &'a Vec<&'a String>,
+    pub chapters: &'a Vec<&'a str>,
+    pub images: &'a Vec<(&'a str, &'a str)>,
+    pub styles_dir: &'a str,
+    pub images_dir: &'a str,
 }

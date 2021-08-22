@@ -21,6 +21,14 @@ where
         .map_err(D::Error::custom)
 }
 
+fn to_xhtml<'de, D>(deserializer: D) -> StdResult<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    Ok(s.replace(".html", ".xhtml"))
+}
+
 #[derive(Deserialize, Debug)]
 pub(crate) struct BillingInfo {
     pub next_billing_date: String,
@@ -40,10 +48,22 @@ pub(crate) struct Credentials {
 pub struct Author {
     pub name: String,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct Subject {
+    pub name: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Publisher {
+    pub name: String,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct Book {
     pub isbn: String,
-    pub cover: String,
+    #[serde(deserialize_with = "parse_url")]
+    pub cover: Url,
     pub chapter_list: String,
     pub toc: String,
     pub flat_toc: String,
@@ -51,6 +71,13 @@ pub struct Book {
     pub source: String,
     pub pagecount: usize,
     pub authors: Vec<Author>,
+    pub subjects: Vec<Subject>,
+    pub publishers: Vec<Publisher>,
+    pub description: String,
+    pub issued: String,
+    #[serde(default)]
+    pub rights: String,
+    pub language: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -73,6 +100,7 @@ pub struct ChapterMeta {
     #[serde(deserialize_with = "parse_url")]
     pub asset_base_url: Url,
     pub title: String,
+    #[serde(deserialize_with = "to_xhtml")]
     pub filename: String,
     pub images: Vec<String>,
     pub stylesheets: Vec<Stylesheet>,
@@ -107,6 +135,7 @@ pub struct TocElement {
     pub natural_key: Vec<String>,
     pub label: String,
     pub full_path: String,
+    #[serde(deserialize_with = "to_xhtml")]
     pub href: String,
     pub id: String,
     pub media_type: String,
