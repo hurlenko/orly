@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use std::{ffi::OsStr, path::PathBuf};
 
-use crate::templates::ContentOpf;
 use crate::{
+    client::{Authenticated, OreillyClient},
     epub::lxml::DocumentExt,
     error::Result,
     models::{Book, Chapter, TocElement},
-    templates::{BaseHtml, ContainerXml, IbooksXml, NavPoint, Toc},
+    templates::{ChapterXhtml, ContainerXml, ContentOpf, IbooksXml, NavPoint, Toc},
 };
 
 use anyhow::Context;
@@ -156,7 +156,7 @@ impl<'a> EpubBuilder<'a> {
                     PathBuf::from(url.path())
                         .file_name()
                         .and_then(OsStr::to_str)
-                        .map(|filename| (url, filename.to_string()))
+                        .map(|filename| (url, format!("{}/{}", IMAGES, filename)))
                 })
             })
             .collect::<Option<Vec<_>>>()
@@ -176,15 +176,14 @@ impl<'a> EpubBuilder<'a> {
             let count = self.stylesheets.len();
             self.stylesheets
                 .entry(style)
-                .or_insert(format!("{}.css", count));
+                .or_insert(format!("{}/{}.css", STYLES, count));
         }
 
         Ok(())
     }
 
     fn add_chapter(&mut self, chapter: &Chapter) -> Result<()> {
-        let chapter_xhtml = BaseHtml {
-            styles_dir: STYLES,
+        let chapter_xhtml = ChapterXhtml {
             styles: &self.stylesheets.values().collect(),
             body: &self.extract_chapter_content(&chapter.content)?,
             should_support_kindle: true,
@@ -229,12 +228,23 @@ impl<'a> EpubBuilder<'a> {
     pub async fn generate<W: tokio::io::AsyncWrite + std::marker::Unpin>(
         &mut self,
         to: W,
+        client: OreillyClient<Authenticated>,
     ) -> Result<()> {
         // Unique urls != unique filenames
         let images_count = self.images.len();
         let unique_images = self.images.values().collect::<HashSet<&String>>().len();
         assert_eq!(images_count, unique_images);
 
+        let files: HashMap<&Url, &String> =
+            self.images.iter().chain(self.stylesheets.iter()).collect();
+
+        println!("Downloading {} files", files.len());
+        for (url, bytes) in client.bulk_download_bytes(files.keys().cloned()).await? {
+            self.zip
+                .write_file(OEBPS.as_path().join(files.get(url).unwrap()), &*bytes)?;
+        }
+
+        println!("Rendering OPF and generating final EPUB");
         self.render_opf()?.zip.generate(to).await?;
         Ok(())
     }
@@ -280,8 +290,6 @@ impl<'a> EpubBuilder<'a> {
                 .iter()
                 .map(|(a, b)| (a.as_str(), b.as_str()))
                 .collect(),
-            styles_dir: STYLES,
-            images_dir: IMAGES,
         };
 
         self.zip.write_file(

@@ -9,9 +9,8 @@ mod filters {
 }
 
 #[derive(Template)]
-#[template(path = "base.xhtml", escape = "xml")]
-pub struct BaseHtml<'a> {
-    pub styles_dir: &'a str,
+#[template(path = "chapter.xhtml", escape = "xml")]
+pub struct ChapterXhtml<'a> {
     pub styles: &'a Vec<&'a String>,
     pub body: &'a str,
     pub should_support_kindle: bool,
@@ -62,6 +61,4 @@ pub struct ContentOpf<'a> {
     pub styles: &'a Vec<&'a String>,
     pub chapters: &'a Vec<&'a str>,
     pub images: &'a Vec<(&'a str, &'a str)>,
-    pub styles_dir: &'a str,
-    pub images_dir: &'a str,
 }

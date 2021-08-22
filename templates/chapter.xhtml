@@ -9,7 +9,7 @@
 >
   <head>
     {% for filename in styles -%}
-      <link href="styles/{{ filename }}" rel="stylesheet" type="text/css" />
+      <link href="{{ filename }}" rel="stylesheet" type="text/css" />
     {% endfor -%}
 
     <style type="text/css">

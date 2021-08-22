@@ -108,8 +108,8 @@ pub struct ChapterMeta {
     pub site_styles: Vec<Url>,
     #[serde(deserialize_with = "parse_url", rename = "content")]
     pub content_url: Url,
-    // pub next_chapter: ChapterNode,
-    // pub previous_chapter: ChapterNode,
+    #[serde(default)]
+    pub position: usize,
 }
 
 pub struct Chapter {
@@ -120,8 +120,6 @@ pub struct Chapter {
 #[derive(Deserialize, Debug)]
 pub(crate) struct ChaptersResponse {
     pub count: usize,
-    pub next: Option<String>,
-    pub previous: Option<String>,
     pub results: Vec<ChapterMeta>,
 }
 

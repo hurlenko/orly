@@ -17,7 +17,7 @@ use crate::{
     models::{BillingInfo, Book, Chapter, ChapterMeta, ChaptersResponse, Credentials, TocElement},
 };
 
-const CONCURRENT_REQUESTS: usize = 10;
+const CONCURRENT_REQUESTS: usize = 20;
 
 pub struct Authenticated;
 pub struct Unauthenticated;
@@ -155,8 +155,23 @@ impl OreillyClient<Authenticated> {
         Ok(response.json::<Book>().await?)
     }
 
-    pub async fn download_bytes(&self, url: Url) -> Result<Bytes> {
-        Ok(self.client.get(url).send().await?.bytes().await?)
+    pub async fn bulk_download_bytes<'a, T: IntoIterator<Item = &'a Url>>(
+        &'a self,
+        urls: T,
+    ) -> Result<Vec<(&'a Url, Bytes)>> {
+        let responses = stream::iter(urls.into_iter())
+            .map(|url| async move {
+                let resp = self.client.get(url.clone()).send().await?.bytes().await?;
+                Ok::<(&'a Url, Bytes), OrlyError>((url, resp))
+            })
+            .buffer_unordered(CONCURRENT_REQUESTS);
+
+        let responses = responses
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(responses)
     }
 
     pub async fn download_text(&self, url: Url) -> Result<String> {
@@ -176,7 +191,7 @@ impl OreillyClient<Authenticated> {
             })
             .buffer_unordered(CONCURRENT_REQUESTS);
 
-        let chapters = chapters
+        let mut chapters = chapters
             .collect::<Vec<_>>()
             .await
             .into_iter()
@@ -184,21 +199,18 @@ impl OreillyClient<Authenticated> {
 
         println!("#chapters: {}", chapters.len());
 
+        chapters.sort_by_key(|c| c.meta.position);
+
         Ok(chapters)
     }
 
-    pub async fn fetch_chapters_meta(&self, book_id: &str) -> Result<Vec<ChapterMeta>> {
+    async fn fetch_chapters_meta(&self, book_id: &str) -> Result<Vec<ChapterMeta>> {
         println!("Loading chapter information");
         let url = self
             .make_url(&format!("api/v1/book/{}/chapter", book_id))?
             .to_string();
 
-        let response = self
-            .client
-            .get(self.make_url(&format!("api/v1/book/{}/chapter", book_id))?)
-            .send()
-            .await?;
-
+        let response = self.client.get(url.clone()).send().await?;
         response.error_for_status_ref()?;
 
         let first_page = response.json::<ChaptersResponse>().await?;
@@ -223,7 +235,7 @@ impl OreillyClient<Authenticated> {
                     resp.json::<ChaptersResponse>().await
                 }
             })
-            .buffer_unordered(CONCURRENT_REQUESTS);
+            .buffered(CONCURRENT_REQUESTS);
 
         let rest_pages = pages
             .collect::<Vec<_>>()
@@ -233,6 +245,10 @@ impl OreillyClient<Authenticated> {
 
         chapters.reserve_exact(total_chapters - per_page);
         chapters.extend(rest_pages.into_iter().flat_map(|r| r.results));
+
+        for (position, chapter) in chapters.iter_mut().enumerate() {
+            chapter.position = position;
+        }
 
         println!("Finished downloading chapter meta");
 

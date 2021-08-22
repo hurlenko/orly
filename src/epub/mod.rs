@@ -20,21 +20,17 @@ pub async fn build_epub(client: OreillyClient<Authenticated>, book_id: &str) -> 
 
     println!("Downloaded {} chapters", chapters.len());
 
-    // Todo use tokio io;
-    let file = File::create("epub.zip")
+    let file = File::create("book.epub")
         .await
         .context("Unable to create file")?;
     let toc = client.fetch_toc(book_id).await?;
     println!("Downloaded toc: {:?}", toc.len());
 
     let mut epub = EpubBuilder::new(&book)?;
-    epub.chapters(&chapters)?.toc(&toc)?.generate(file).await?;
-
-    // parse_chapters(&client, chapters).await?;
-
-    // for (idx, chapter) in chapters.iter().enumerate() {
-    //     println!("{} {}", idx, chapter.content_url);
-    // }
+    epub.chapters(&chapters)?
+        .toc(&toc)?
+        .generate(file, client)
+        .await?;
 
     Ok(())
 }

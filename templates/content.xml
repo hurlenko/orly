@@ -23,10 +23,10 @@
       <item id="{{ filename|to_id }}" href="{{ filename }}" media-type="application/xhtml+xml" />
       {% endfor %}
       {% for (filename, mime) in images %}
-      <item id="{{ filename|to_id }}" href="{{ images_dir }}/{{ filename }}" media-type="image/{{ mime }}" />
+      <item id="{{ filename|to_id }}" href="{{ filename }}" media-type="image/{{ mime }}" />
       {% endfor %}
       {% for filename in styles %}
-      <item id="{{ filename|to_id }}" href="{{ styles_dir }}/{{ filename }}" media-type="text/css" />
+      <item id="{{ filename|to_id }}" href="{{ filename }}" media-type="text/css" />
       {% endfor %}
    </manifest>
    <spine toc="ncx">

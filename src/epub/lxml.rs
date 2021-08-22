@@ -78,9 +78,7 @@ pub(crate) trait DocumentExt {
             .map(|node| {
                 let found = link_attrs
                     .iter()
-                    .filter_map(|attr| {
-                        node.get_attribute(attr).map(|_| attr.to_string())
-                    })
+                    .filter_map(|attr| node.get_attribute(attr).map(|_| attr.to_string()))
                     .collect();
                 (node, found)
             })
