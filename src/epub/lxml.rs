@@ -90,9 +90,6 @@ pub(crate) trait DocumentExt {
             for attr in attrs {
                 if let Some(curr_url) = node.get_attribute(&attr) {
                     let new_url = link_repl_func(&curr_url);
-                    // if new_url != curr_url {
-                    //     println!("Old: {}\nNew: {}\n", curr_url, new_url);
-                    // }
                     if node.set_attribute(&attr, &new_url).is_err() {
                         println!("Failed to set node attr {}", attr);
                     }

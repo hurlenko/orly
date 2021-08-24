@@ -17,8 +17,6 @@ use crate::{
     models::{BillingInfo, Book, Chapter, ChapterMeta, ChaptersResponse, Credentials, TocElement},
 };
 
-const CONCURRENT_REQUESTS: usize = 20;
-
 pub struct Authenticated;
 pub struct Unauthenticated;
 mod private {
@@ -36,6 +34,7 @@ pub struct OreillyClient<S: AuthState> {
     client: Client,
     base_url: Url,
     marker: std::marker::PhantomData<S>,
+    concurrent_requests: usize,
 }
 
 impl<S: AuthState> OreillyClient<S> {
@@ -64,13 +63,17 @@ impl Default for OreillyClient<Unauthenticated> {
                 .parse()
                 .expect("correct base url"),
             marker: std::marker::PhantomData,
+            concurrent_requests: 20,
         }
     }
 }
 
 impl OreillyClient<Unauthenticated> {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(concurrent_requests: usize) -> Self {
+        Self {
+            concurrent_requests,
+            ..Default::default()
+        }
     }
 
     async fn check_login(&self) -> Result<()> {
@@ -101,8 +104,8 @@ impl OreillyClient<Unauthenticated> {
 
     pub async fn cred_auth(
         self,
-        email: String,
-        password: String,
+        email: &str,
+        password: &str,
     ) -> Result<OreillyClient<Authenticated>> {
         println!("Logging into Safari Books Online...");
 
@@ -137,13 +140,14 @@ impl OreillyClient<Unauthenticated> {
         Ok(OreillyClient {
             client: self.client,
             base_url: self.base_url,
+            concurrent_requests: self.concurrent_requests,
             marker: std::marker::PhantomData,
         })
     }
 }
 
 impl OreillyClient<Authenticated> {
-    pub async fn fetch_book_deails(&self, book_id: &str) -> Result<Book> {
+    pub async fn fetch_book_details(&self, book_id: &str) -> Result<Book> {
         let response = self
             .client
             .get(self.make_url(&format!("api/v1/book/{}/", book_id))?)
@@ -164,7 +168,7 @@ impl OreillyClient<Authenticated> {
                 let resp = self.client.get(url.clone()).send().await?.bytes().await?;
                 Ok::<(&'a Url, Bytes), OrlyError>((url, resp))
             })
-            .buffer_unordered(CONCURRENT_REQUESTS);
+            .buffer_unordered(self.concurrent_requests);
 
         let responses = responses
             .collect::<Vec<_>>()
@@ -189,7 +193,7 @@ impl OreillyClient<Authenticated> {
                 let content = self.download_text(meta.content_url.clone()).await?;
                 Ok::<Chapter, OrlyError>(Chapter { meta, content })
             })
-            .buffer_unordered(CONCURRENT_REQUESTS);
+            .buffer_unordered(self.concurrent_requests);
 
         let mut chapters = chapters
             .collect::<Vec<_>>()
@@ -235,7 +239,7 @@ impl OreillyClient<Authenticated> {
                     resp.json::<ChaptersResponse>().await
                 }
             })
-            .buffered(CONCURRENT_REQUESTS);
+            .buffered(self.concurrent_requests);
 
         let rest_pages = pages
             .collect::<Vec<_>>()

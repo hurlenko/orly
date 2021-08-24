@@ -37,13 +37,15 @@ pub struct EpubBuilder<'a> {
     chapter_names: Vec<&'a str>,
     // image name
     cover: String,
+    kindle: bool,
 }
 
 impl<'a> EpubBuilder<'a> {
-    pub fn new(book: &'a Book) -> Result<Self> {
+    pub fn new(book: &'a Book, kindle: bool) -> Result<Self> {
         let mut epub = EpubBuilder {
             zip: ZipArchive::new()?,
             book,
+            kindle,
             parser: Parser::default_html(),
             stylesheets: Default::default(),
             images: Default::default(),
@@ -116,21 +118,6 @@ impl<'a> EpubBuilder<'a> {
     fn extract_chapter_content(&self, chapter_body: &str) -> Result<String> {
         let document = self.parser.parse_string(chapter_body)?;
         document.rewrite_links(|old| self.rewrite_chapter_links(old));
-        // for (node, attrs) in document.iterlinks() {
-        //     if attrs.len() > 0 {
-        //         println!(
-        //             "{:?} - {}",
-        //             attrs,
-        //             document.node_to_string_with_options(
-        //                 &node,
-        //                 SaveOptions {
-        //                     as_xml: true,
-        //                     ..Default::default()
-        //                 }
-        //             )
-        //         );
-        //     }
-        // }
 
         let body = document.xpath("//div[@id='sbo-rt-content']");
         assert_eq!(body.len(), 1);
@@ -186,7 +173,7 @@ impl<'a> EpubBuilder<'a> {
         let chapter_xhtml = ChapterXhtml {
             styles: &self.stylesheets.values().collect(),
             body: &self.extract_chapter_content(&chapter.content)?,
-            should_support_kindle: true,
+            should_support_kindle: self.kindle,
         };
 
         let filename = OEBPS.as_path().join(&chapter.meta.filename);
