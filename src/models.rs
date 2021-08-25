@@ -36,12 +36,7 @@ pub(crate) struct BillingInfo {
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct Credentials {
-    id_token: String,
-    refresh_token: String,
     pub logged_in: bool,
-    expires_at: String,
-    redirect_uri: String,
-    uuid: String,
 }
 
 #[derive(Deserialize, Debug)]
