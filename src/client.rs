@@ -5,6 +5,7 @@ use chrono::{DateTime, Local, Utc};
 use futures::stream::{self, StreamExt};
 
 use anyhow::Context;
+use log::{error, info, trace};
 use reqwest::{
     header::{
         HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
@@ -76,8 +77,8 @@ impl OreillyClient<Unauthenticated> {
         }
     }
 
-    async fn check_login(&self) -> Result<()> {
-        println!("Validating subscription");
+    async fn check_subscription(&self) -> Result<()> {
+        info!("Validating subscription");
         let response = self
             .client
             .get(self.make_url("api/v1/payments/next_billing_date/")?)
@@ -88,14 +89,17 @@ impl OreillyClient<Unauthenticated> {
 
         let billing = response.json::<BillingInfo>().await?;
 
+        trace!("Billing details: {:#?}", &billing);
+
         let expiration = DateTime::parse_from_rfc3339(&billing.next_billing_date)
             .context("Failed to parse next billing date")?;
 
         let local: DateTime<Local> = DateTime::from(expiration);
 
-        println!("Subscription expiration: {}", local);
+        info!("Subscription expiration: {}", local);
 
         if expiration < Utc::now() {
+            error!("Subscription expired on {}", local);
             return Err(OrlyError::SubscriptionExpired);
         }
 
@@ -107,7 +111,7 @@ impl OreillyClient<Unauthenticated> {
         email: &str,
         password: &str,
     ) -> Result<OreillyClient<Authenticated>> {
-        println!("Logging into Safari Books Online...");
+        info!("Logging into Safari Books Online...");
 
         let mut map = HashMap::new();
         map.insert("email", email);
@@ -135,7 +139,7 @@ impl OreillyClient<Unauthenticated> {
             ));
         }
 
-        self.check_login().await?;
+        self.check_subscription().await?;
 
         Ok(OreillyClient {
             client: self.client,
@@ -148,6 +152,7 @@ impl OreillyClient<Unauthenticated> {
 
 impl OreillyClient<Authenticated> {
     pub async fn fetch_book_details(&self, book_id: &str) -> Result<Book> {
+        info!("Fetching book details");
         let response = self
             .client
             .get(self.make_url(&format!("api/v1/book/{}/", book_id))?)
@@ -155,8 +160,9 @@ impl OreillyClient<Authenticated> {
             .await?;
 
         response.error_for_status_ref()?;
-
-        Ok(response.json::<Book>().await?)
+        let book = response.json::<Book>().await?;
+        trace!("Book: {:#?}", &book);
+        Ok(book)
     }
 
     pub async fn bulk_download_bytes<'a, T: IntoIterator<Item = &'a Url>>(
@@ -186,7 +192,7 @@ impl OreillyClient<Authenticated> {
         &self,
         chapters_meta: Vec<ChapterMeta>,
     ) -> Result<Vec<Chapter>> {
-        println!("Fetching chapter content");
+        info!("Fetching chapter content");
 
         let chapters = stream::iter(chapters_meta.into_iter())
             .map(|meta| async move {
@@ -201,15 +207,15 @@ impl OreillyClient<Authenticated> {
             .into_iter()
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        println!("#chapters: {}", chapters.len());
-
         chapters.sort_by_key(|c| c.meta.position);
+
+        trace!("Chapter content: {:?}", chapters);
 
         Ok(chapters)
     }
 
     async fn fetch_chapters_meta(&self, book_id: &str) -> Result<Vec<ChapterMeta>> {
-        println!("Loading chapter information");
+        info!("Loading chapter information");
         let url = self
             .make_url(&format!("api/v1/book/{}/chapter", book_id))?
             .to_string();
@@ -219,12 +225,14 @@ impl OreillyClient<Authenticated> {
 
         let first_page = response.json::<ChaptersResponse>().await?;
 
+        trace!("First page: {:#?}", first_page);
+
         let total_chapters = first_page.count;
         let per_page = first_page.results.len();
         let pages = (first_page.count + (per_page - 1)) / per_page;
         let mut chapters = first_page.results;
 
-        println!(
+        info!(
             "Downloading {} chapters, {} chapters per page, {} pages",
             total_chapters, per_page, pages
         );
@@ -254,19 +262,19 @@ impl OreillyClient<Authenticated> {
             chapter.position = position;
         }
 
-        println!("Finished downloading chapter meta");
+        trace!("Chapters meta: {:?}", chapters);
+        info!("Finished downloading chapter meta");
 
         Ok(chapters)
     }
 
     pub async fn fetch_book_chapters(&self, book_id: &str) -> Result<Vec<Chapter>> {
         let meta = self.fetch_chapters_meta(book_id).await?;
-        println!("#meta: {}", meta.len());
         self.fetch_chapters_content(meta).await
     }
 
     pub async fn fetch_toc(&self, book_id: &str) -> Result<Vec<TocElement>> {
-        println!("Loading table of contents");
+        info!("Loading table of contents");
 
         let response = self
             .client
@@ -276,6 +284,8 @@ impl OreillyClient<Authenticated> {
 
         response.error_for_status_ref()?;
 
-        Ok(response.json::<Vec<TocElement>>().await?)
+        let toc = response.json::<Vec<TocElement>>().await?;
+        trace!("Table of contants: {:#?}", toc);
+        Ok(toc)
     }
 }

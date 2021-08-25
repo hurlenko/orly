@@ -112,6 +112,7 @@ pub struct ChapterMeta {
     pub position: usize,
 }
 
+#[derive(Debug)]
 pub struct Chapter {
     pub meta: ChapterMeta,
     pub content: String,

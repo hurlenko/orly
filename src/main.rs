@@ -1,8 +1,9 @@
 use clap::{Clap, ValueHint};
+use fern::colors::{Color, ColoredLevelConfig};
+use log::{error, info};
 use orly::{client::OreillyClient, epub::builder::EpubBuilder, error::Result, models::Book};
 use sanitize_filename::sanitize;
 use std::path::{Path, PathBuf};
-
 use tokio::fs::File;
 
 use anyhow::Context;
@@ -16,7 +17,7 @@ fn path_exists(v: &str) -> std::result::Result<(), String> {
 
 #[derive(Clap, Debug)]
 #[clap(author, about, version)]
-struct Opt {
+struct CliArgs {
     #[clap(
         short,
         long,
@@ -78,11 +79,7 @@ fn generate_filename(book: &Book) -> String {
     sanitize(filename)
 }
 
-async fn run() -> Result<()> {
-    let cli_args = Opt::parse();
-
-    println!("{:#?}", cli_args);
-
+async fn run(cli_args: &CliArgs) -> Result<()> {
     let email = &cli_args.creds[0];
     let password = &cli_args.creds[1];
     let book_id = &cli_args.book_id;
@@ -91,12 +88,21 @@ async fn run() -> Result<()> {
         .cred_auth(email, password)
         .await?;
 
+    info!("Getting book info");
     let book = client.fetch_book_details(book_id).await?;
-    println!("{:#?}", book);
+    info!("Title: {}", book.title);
+    info!(
+        "Authors: {:?}",
+        book.authors
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<&str>>()
+            .join(", ")
+    );
 
     let chapters = client.fetch_book_chapters(book_id).await?;
 
-    println!("Downloaded {} chapters", chapters.len());
+    info!("Downloaded {} chapters", chapters.len());
 
     let output = cli_args
         .output
@@ -107,7 +113,7 @@ async fn run() -> Result<()> {
         .await
         .context("Unable to create file")?;
     let toc = client.fetch_toc(book_id).await?;
-    println!("Downloaded toc: {:?}", toc.len());
+    info!("Downloaded toc: {}", toc.len());
 
     EpubBuilder::new(&book, cli_args.kindle)?
         .chapters(&chapters)?
@@ -115,15 +121,56 @@ async fn run() -> Result<()> {
         .generate(file, client)
         .await?;
 
-    println!("Done! Saved as {:?}", output);
+    info!("Done! Saved as {:?}", output);
 
     Ok(())
 }
 
+fn set_up_logging(verbosity: u8) {
+    let mut base_config = fern::Dispatch::new();
+
+    base_config = match verbosity {
+        0 => base_config.level(log::LevelFilter::Info),
+        1 => base_config.level(log::LevelFilter::Debug),
+        _ => base_config.level(log::LevelFilter::Trace),
+    };
+
+    // configure colors for the whole line
+    let colors_line = ColoredLevelConfig::new()
+        .error(Color::Red)
+        .warn(Color::Yellow)
+        .info(Color::White)
+        .debug(Color::White)
+        .trace(Color::BrightBlack);
+
+    let colors_level = colors_line.info(Color::Green).debug(Color::BrightMagenta);
+
+    base_config
+        .format(move |out, message, record| {
+            out.finish(format_args!(
+                "{color_line}[{date}][{target}][{level}{color_line}] {message}\x1B[0m",
+                color_line = format_args!(
+                    "\x1B[{}m",
+                    colors_line.get_color(&record.level()).to_fg_str()
+                ),
+                date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                target = record.target(),
+                level = colors_level.color(record.level()),
+                message = message,
+            ));
+        })
+        .chain(std::io::stdout())
+        .apply()
+        .expect("failed to initialize logging.");
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    if let Err(err) = run().await {
-        eprintln!("{}", err)
+    let cli_args = CliArgs::parse();
+    set_up_logging(cli_args.verbose);
+
+    if let Err(err) = run(&cli_args).await {
+        error!("{}", err)
     }
 
     Ok(())

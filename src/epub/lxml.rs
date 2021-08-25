@@ -4,6 +4,7 @@ use libxml::{
     tree::{Document, Node, SaveOptions},
     xpath::{Context as XpathContext, Object},
 };
+use log::{error, trace};
 use std::{ffi::CStr, os::raw::c_char};
 
 pub(crate) trait NodeType {
@@ -85,17 +86,23 @@ pub(crate) trait DocumentExt {
             .collect()
     }
 
-    fn rewrite_links<F: Fn(&str) -> String>(&self, link_repl_func: F) {
+    fn rewrite_links<F: Fn(&str) -> String>(&self, link_repl_func: F) -> usize {
+        let mut rewritten = 0;
         for (mut node, attrs) in self.iterlinks() {
             for attr in attrs {
                 if let Some(curr_url) = node.get_attribute(&attr) {
                     let new_url = link_repl_func(&curr_url);
+                    if new_url != curr_url {
+                        trace!("Url replace: {} --> {}", curr_url, new_url);
+                        rewritten += 1;
+                    }
                     if node.set_attribute(&attr, &new_url).is_err() {
-                        println!("Failed to set node attr {}", attr);
+                        error!("Failed to set node attr {}", attr);
                     }
                 }
             }
         }
+        rewritten
     }
 }
 

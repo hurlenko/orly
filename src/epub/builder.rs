@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use std::{ffi::OsStr, path::PathBuf};
 
+use crate::error::OrlyError;
 use crate::{
     client::{Authenticated, OreillyClient},
     epub::lxml::DocumentExt,
@@ -14,6 +15,7 @@ use anyhow::Context;
 use askama::Template;
 
 use libxml::{parser::Parser, tree::SaveOptions};
+use log::{debug, info, warn};
 use reqwest::Url;
 use url::ParseError;
 
@@ -117,10 +119,16 @@ impl<'a> EpubBuilder<'a> {
 
     fn extract_chapter_content(&self, chapter_body: &str) -> Result<String> {
         let document = self.parser.parse_string(chapter_body)?;
-        document.rewrite_links(|old| self.rewrite_chapter_links(old));
+        let rewritten = document.rewrite_links(|old| self.rewrite_chapter_links(old));
+        debug!("Links rewritten: {}", rewritten);
 
         let body = document.xpath("//div[@id='sbo-rt-content']");
-        assert_eq!(body.len(), 1);
+        if body.len() != 1 {
+            return Err(OrlyError::ParseError(format!(
+                "Unable to find content div in chapter: {}",
+                chapter_body
+            )));
+        }
 
         Ok(document.node_to_string_with_options(
             &body[0],
@@ -170,6 +178,7 @@ impl<'a> EpubBuilder<'a> {
     }
 
     fn add_chapter(&mut self, chapter: &Chapter) -> Result<()> {
+        debug!("Processing {}", &chapter.meta.filename);
         let chapter_xhtml = ChapterXhtml {
             styles: &self.stylesheets.values().collect(),
             body: &self.extract_chapter_content(&chapter.content)?,
@@ -195,6 +204,7 @@ impl<'a> EpubBuilder<'a> {
             if chapter.meta.filename.to_lowercase().contains("cover")
                 || chapter.meta.title.to_lowercase().contains("cover")
             {
+                debug!("Found cover in {:?}", chapter.meta.filename);
                 assert_eq!(images.len(), 1);
                 self.cover = images[0].1.clone();
             }
@@ -207,8 +217,8 @@ impl<'a> EpubBuilder<'a> {
             self.add_chapter(chapter)?;
         }
 
-        println!("Found {} images", self.images.len());
-        println!("Found {} stylesheets", self.stylesheets.len());
+        info!("Found {} images", self.images.len());
+        info!("Found {} stylesheets", self.stylesheets.len());
         Ok(self)
     }
 
@@ -220,18 +230,20 @@ impl<'a> EpubBuilder<'a> {
         // Unique urls != unique filenames
         let images_count = self.images.len();
         let unique_images = self.images.values().collect::<HashSet<&String>>().len();
-        assert_eq!(images_count, unique_images);
+        if images_count != unique_images {
+            warn!("Images have non-unique names, some of them might get overwritten");
+        }
 
         let files: HashMap<&Url, &String> =
             self.images.iter().chain(self.stylesheets.iter()).collect();
 
-        println!("Downloading {} files", files.len());
+        info!("Downloading {} files", files.len());
         for (url, bytes) in client.bulk_download_bytes(files.keys().cloned()).await? {
             self.zip
                 .write_file(OEBPS.as_path().join(files.get(url).unwrap()), &*bytes)?;
         }
 
-        println!("Rendering OPF and generating final EPUB");
+        info!("Rendering OPF and generating final EPUB");
         self.render_opf()?.zip.generate(to).await?;
         Ok(())
     }

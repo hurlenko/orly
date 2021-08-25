@@ -6,6 +6,8 @@ pub enum OrlyError {
     HttpRequest(#[from] reqwest::Error),
     #[error("Failed to parse xml/html: {0}")]
     XmlParseError(#[from] libxml::parser::XmlParseError),
+    #[error("Failed to parse xml/html: {0}")]
+    ParseError(String),
     #[error("Xpath error")]
     XpathError(()),
     #[error("Authentication failure: {0}")]
