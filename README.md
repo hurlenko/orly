@@ -1,3 +1,4 @@
+<!-- omit in toc -->
 # orly
 
 Download O'Reilly books as EPUB.
@@ -7,25 +8,65 @@ Download O'Reilly books as EPUB.
 ![Crates.io](https://img.shields.io/crates/d/orly)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
+<!-- omit in toc -->
 ## Table of Contents
 
 - [Installation](#installation)
+  - [Github releases (recommended)](#github-releases-recommended)
+  - [Cargo](#cargo)
 - [Usage](#usage)
 - [Command line interface](#command-line-interface)
 
 ## Installation
 
-- **[Archives of precompiled binaries for orly are available for Windows,
+### Github releases (recommended)
+
+**[Archives of precompiled binaries for orly are available for Windows,
 macOS and Linux.](https://github.com/hurlenko/orly/releases)** Linux and
 Windows binaries are static executables.
 
-- If you're a **Rust programmer**, orly can be installed with `cargo`.
+### Cargo
+
+If you're a **Rust programmer**, orly can be installed with `cargo`.
 
     > Note that the minimum supported version of Rust for `orly` is **1.54.0**.
 
+You need to install the development headers of `libxml2` first. The process depends on the OS being used:
+
+- Windows
+
+    First install [vcpkg](https://github.com/microsoft/vcpkg). After that install `libxml2`:
+
     ```bash
-    cargo install orly
+    vcpkg install libxml2:x64-windows-static
     ```
+
+    Export compilator options to force static linking:
+    ```bash
+    $env:RUSTFLAGS="-Ctarget-feature=+crt-static"
+    ```
+
+- Linux
+
+    On linux systems you'd `pkg-config`. For Debian-based distributions:
+
+    ```bash
+    apt-get install libxml2-dev pkg-config
+    ```
+
+- macOS
+  
+    Use `brew` to install `libxml2` and `pkg-config`:
+
+    ```bash
+    brew install libxml2 pkg-config
+    ```
+
+Finally install `orly`:
+
+```bash
+cargo install orly
+```
 
 After installation, the `orly` command will be available. Check the [command line](#command-line-interface) section for supported commands.
 
