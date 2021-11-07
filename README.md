@@ -76,10 +76,12 @@ After installation, the `orly` command will be available. Check the [command lin
 
 - Find the book you want to download and copy its id (the digits at the end of the url).
 
-- Use your credentials to download the book:
+- Use your credentials or a cookie string to download the book:
 
     ```bash
-    orly --creds "email@example.com" "password" 1234567890
+    orly 1234567890 --creds "email@example.com" "password"
+    # or
+    orly 1234567890 --cookie 'BrowserCookie=....'
     ```
 
 ## Command line interface
@@ -101,6 +103,7 @@ FLAGS:
 
 OPTIONS:
     -c, --creds <EMAIL> <PASSWORD>     Sign in credentials
+        --cookie <COOKIE_STRING>       Cookie string
     -o, --output <OUTPUT DIR>          Directory to save the final epub to [default: .]
     -t, --threads <THREADS>            Sets the maximum number of concurrent http requests [default: 20]
 ```

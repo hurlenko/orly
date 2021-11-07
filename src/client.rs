@@ -8,9 +8,10 @@ use anyhow::Context;
 use log::{error, info, trace};
 use reqwest::{
     header::{
-        HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
+        HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, COOKIE, UPGRADE_INSECURE_REQUESTS,
+        USER_AGENT,
     },
-    Client, Url,
+    Client, ClientBuilder, Url,
 };
 
 use crate::{
@@ -49,17 +50,8 @@ impl<S: AuthState> OreillyClient<S> {
 
 impl Default for OreillyClient<Unauthenticated> {
     fn default() -> Self {
-        let mut headers = HeaderMap::new();
-        headers.insert(ACCEPT, HeaderValue::from_static("application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"));
-        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate"));
-        headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
-        headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"));
         Self {
-            client: reqwest::Client::builder()
-                .default_headers(headers)
-                .cookie_store(true)
-                .build()
-                .expect("to build the client"),
+            client: Self::default_client().build().expect("to build the client"),
             base_url: "https://learning.oreilly.com"
                 .parse()
                 .expect("correct base url"),
@@ -77,10 +69,20 @@ impl OreillyClient<Unauthenticated> {
         }
     }
 
-    async fn check_subscription(&self) -> Result<()> {
+    fn default_client() -> ClientBuilder {
+        let mut headers = HeaderMap::new();
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"));
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate"));
+        headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+        headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"));
+        reqwest::Client::builder()
+            .default_headers(headers)
+            .cookie_store(true)
+    }
+
+    async fn check_subscription(&self, client: &Client) -> Result<()> {
         info!("Validating subscription");
-        let response = self
-            .client
+        let response = client
             .get(self.make_url("api/v1/payments/next_billing_date/")?)
             .send()
             .await?;
@@ -139,10 +141,32 @@ impl OreillyClient<Unauthenticated> {
             ));
         }
 
-        self.check_subscription().await?;
+        self.check_subscription(&self.client).await?;
 
         Ok(OreillyClient {
             client: self.client,
+            base_url: self.base_url,
+            concurrent_requests: self.concurrent_requests,
+            marker: std::marker::PhantomData,
+        })
+    }
+
+    pub async fn cookie_auth(self, cookie: &str) -> Result<OreillyClient<Authenticated>> {
+        info!("Logging into Safari Books Online usig cookies...");
+
+        let mut request_headers = HeaderMap::new();
+        request_headers.insert(
+            COOKIE,
+            HeaderValue::from_str(cookie).context("Invalid cookie")?,
+        );
+
+        let client = Self::default_client()
+            .default_headers(request_headers)
+            .build()?;
+        self.check_subscription(&client).await?;
+
+        Ok(OreillyClient {
+            client,
             base_url: self.base_url,
             concurrent_requests: self.concurrent_requests,
             marker: std::marker::PhantomData,

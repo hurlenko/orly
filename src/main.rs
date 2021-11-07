@@ -1,4 +1,4 @@
-use clap::{Clap, ValueHint};
+use clap::{Parser, ValueHint};
 use fern::colors::{Color, ColoredLevelConfig};
 use log::{error, info};
 use orly::{client::OreillyClient, epub::builder::EpubBuilder, error::Result, models::Book};
@@ -15,7 +15,7 @@ fn path_exists(v: &str) -> std::result::Result<(), String> {
     Err(format!("The specifiied path does not exist: {}", v))
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(author, about, version)]
 struct CliArgs {
     #[clap(
@@ -23,10 +23,18 @@ struct CliArgs {
         long,
         value_name = "EMAIL PASSWORD",
         about = "Sign in credentials",
-        required = true,
+        required_unless_present = "cookie",
+        conflicts_with = "cookie",
         number_of_values = 2
     )]
-    creds: Vec<String>,
+    creds: Option<Vec<String>>,
+    #[clap(
+        long,
+        value_name = "COOKIE_STRING",
+        about = "Cookie string",
+        required_unless_present = "creds"
+    )]
+    cookie: Option<String>,
     #[clap(
         short,
         long,
@@ -80,13 +88,14 @@ fn generate_filename(book: &Book) -> String {
 }
 
 async fn run(cli_args: &CliArgs) -> Result<()> {
-    let email = &cli_args.creds[0];
-    let password = &cli_args.creds[1];
     let book_id = &cli_args.book_id;
 
-    let client = OreillyClient::new(cli_args.threads)
-        .cred_auth(email, password)
-        .await?;
+    let client = OreillyClient::new(cli_args.threads);
+    let client = if let Some(creds) = &cli_args.creds {
+        client.cred_auth(&creds[0], &creds[1]).await?
+    } else {
+        client.cookie_auth(cli_args.cookie.as_ref().unwrap()).await?
+    };
 
     info!("Getting book info");
     let book = client.fetch_book_details(book_id).await?;
