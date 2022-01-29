@@ -1,12 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use std::{ffi::OsStr, path::PathBuf};
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
 
-use crate::error::OrlyError;
 use crate::{
     client::{Authenticated, OreillyClient},
     epub::lxml::DocumentExt,
-    error::Result,
+    error::{OrlyError, Result},
     models::{Book, Chapter, TocElement},
     templates::{ChapterXhtml, ContainerXml, ContentOpf, IbooksXml, NavPoint, Toc},
 };
@@ -140,7 +142,11 @@ impl<'a> EpubBuilder<'a> {
     }
 
     fn extract_images(&self, chapter: &Chapter) -> Result<Vec<(Url, String)>> {
-        let base_url = &chapter.meta.asset_base_url;
+        let base_url = Url::parse(&format!(
+            "https://learning.oreilly.com/api/v2/epubs/urn:orm:book:{}/files/",
+            self.book.identifier
+        ))
+        .unwrap();
 
         let image_urls = chapter
             .meta
@@ -201,8 +207,9 @@ impl<'a> EpubBuilder<'a> {
         for chapter in chapters {
             let images = self.extract_images(chapter)?;
 
-            if chapter.meta.filename.to_lowercase().contains("cover")
-                || chapter.meta.title.to_lowercase().contains("cover")
+            if let Some("cover") = Path::new(&chapter.meta.filename.to_lowercase())
+                .file_stem()
+                .and_then(OsStr::to_str)
             {
                 debug!("Found cover in {:?}", chapter.meta.filename);
                 assert_eq!(images.len(), 1);
