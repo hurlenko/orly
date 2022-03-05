@@ -56,6 +56,7 @@ pub struct Publisher {
 
 #[derive(Deserialize, Debug)]
 pub struct Book {
+    pub identifier: String,
     pub isbn: String,
     #[serde(deserialize_with = "parse_url")]
     pub cover: Url,
