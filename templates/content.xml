@@ -14,8 +14,8 @@
       <dc:rights>{{ rights }}</dc:rights>
       <dc:language>{{ language }}</dc:language>
       <dc:date>{{ issued }}</dc:date>
-      <dc:identifier id="bookid">{{ isbn }}</dc:identifier>
-      <meta name="cover" content="{{ cover_image }}" />
+      <dc:identifier id="bookid">ID:ISBN:{{ isbn }}</dc:identifier>
+      <meta name="cover" content="{{ cover_image|to_id }}" />
    </metadata>
    <manifest>
       <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
