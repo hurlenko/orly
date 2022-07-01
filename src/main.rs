@@ -21,8 +21,8 @@ struct CliArgs {
     #[clap(
         short,
         long,
-        value_name = "EMAIL PASSWORD",
-        about = "Sign in credentials",
+        value_names = &["EMAIL", "PASSWORD"],
+        help = "Sign in credentials",
         required_unless_present = "cookie",
         conflicts_with = "cookie",
         number_of_values = 2
@@ -31,36 +31,36 @@ struct CliArgs {
     #[clap(
         long,
         value_name = "COOKIE_STRING",
-        about = "Cookie string",
+        help = "Cookie string",
         required_unless_present = "creds"
     )]
     cookie: Option<String>,
     #[clap(
         short,
         long,
-        about = "Tweak css to avoid overflow. Useful for e-readers"
+        help = "Tweak css to avoid overflow. Useful for e-readers"
     )]
     kindle: bool,
     #[clap(
         short,
         long,
-        about = "Sets the level of verbosity",
+        help = "Sets the level of verbosity",
         parse(from_occurrences)
     )]
     verbose: u8,
     #[clap(
         short,
         long,
-        about = "Sets the maximum number of concurrent http requests",
+        help = "Sets the maximum number of concurrent http requests",
         default_value = "20"
     )]
     threads: usize,
-    #[clap(about = "Book ID to download. Digits from the URL", required = true)]
+    #[clap(help = "Book ID to download. Digits from the URL", required = true)]
     book_id: String,
     #[clap(
         short,
         long,
-        about = "Directory to save the final epub to",
+        help = "Directory to save the final epub to",
         name = "OUTPUT DIR",
         parse(from_os_str),
         value_hint = ValueHint::DirPath,
@@ -94,7 +94,9 @@ async fn run(cli_args: &CliArgs) -> Result<()> {
     let client = if let Some(creds) = &cli_args.creds {
         client.cred_auth(&creds[0], &creds[1]).await?
     } else {
-        client.cookie_auth(cli_args.cookie.as_ref().unwrap()).await?
+        client
+            .cookie_auth(cli_args.cookie.as_ref().unwrap())
+            .await?
     };
 
     info!("Getting book info");
