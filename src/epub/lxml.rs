@@ -44,6 +44,27 @@ pub(crate) trait DocumentExt {
         }
     }
 
+    fn strip_invalid_attributes(&self) -> usize {
+        let mut stripped = 0;
+        let invalid_attrs = ["data-", "epub:type"];
+
+        for attr in invalid_attrs {
+            let query = format!("//*[attribute::*[contains(local-name(), '{}')]]", attr);
+            for mut node in self.xpath_mut(&query) {
+                for (full_attr, _) in node.get_attributes() {
+                    if full_attr.contains(attr) {
+                        if let Err(error) = node.remove_attribute(&full_attr) {
+                            error!("Failed to delete node attribute: {}", error)
+                        } else {
+                            stripped += 1;
+                        }
+                    }
+                }
+            }
+        }
+        stripped
+    }
+
     fn iterlinks(&self) -> Vec<(Node, Vec<String>)> {
         let link_attrs = [
             "action",

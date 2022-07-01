@@ -18,11 +18,21 @@ use askama::Template;
 
 use libxml::{parser::Parser, tree::SaveOptions};
 use log::{debug, info, warn};
+use parcel_css::{
+    declaration::DeclarationBlock,
+    properties::{
+        display::{Display, DisplayKeyword, Visibility},
+        Property,
+    },
+    rules::{style::StyleRule, CssRule, CssRuleList},
+};
 use reqwest::Url;
 use url::ParseError;
 
 use super::zip::ZipArchive;
 use lazy_static::lazy_static;
+
+use parcel_css::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, StyleSheet};
 
 const XHTML: &str = "xhtml";
 const IMAGES: &str = "images";
@@ -123,6 +133,8 @@ impl<'a> EpubBuilder<'a> {
         let document = self.parser.parse_string(chapter_body)?;
         let rewritten = document.rewrite_links(|old| self.rewrite_chapter_links(old));
         debug!("Links rewritten: {}", rewritten);
+        // let stripped = document.strip_invalid_attributes();
+        // warn!("Invalid attributes stripped: {}", stripped);
 
         let body = document.xpath("//div[@id='sbo-rt-content']");
         if body.len() != 1 {
@@ -229,6 +241,30 @@ impl<'a> EpubBuilder<'a> {
         Ok(self)
     }
 
+    fn rewrite_css_rules(parent_rules: &mut CssRuleList) {
+        for rule in parent_rules.0.iter_mut() {
+            match rule {
+                CssRule::Style(StyleRule {
+                    declarations: DeclarationBlock { declarations, .. },
+                    rules,
+                    ..
+                }) => {
+                    for property in declarations.iter_mut() {
+                        if let Property::Display(Display::Keyword(DisplayKeyword::None)) = property
+                        {
+                            warn!("Found display: none, replacing");
+                            *property = Property::Visibility(Visibility::Hidden)
+                        }
+                    }
+                    if !rules.0.is_empty() {
+                        Self::rewrite_css_rules(rules)
+                    }
+                }
+                _ => (),
+            };
+        }
+    }
+
     pub async fn generate<W: tokio::io::AsyncWrite + std::marker::Unpin>(
         &mut self,
         to: W,
@@ -241,13 +277,49 @@ impl<'a> EpubBuilder<'a> {
             warn!("Images have non-unique names, some of them might get overwritten");
         }
 
-        let files: HashMap<&Url, &String> =
-            self.images.iter().chain(self.stylesheets.iter()).collect();
-
-        info!("Downloading {} files", files.len());
-        for (url, bytes) in client.bulk_download_bytes(files.keys().cloned()).await? {
+        info!("Downloading {} images", self.images.len());
+        for (url, bytes) in client.bulk_download_bytes(self.images.keys()).await? {
             self.zip
-                .write_file(OEBPS.as_path().join(files.get(url).unwrap()), &*bytes)?;
+                .write_file(OEBPS.as_path().join(self.images.get(url).unwrap()), &*bytes)?;
+        }
+
+        info!("Downloading {} css", self.stylesheets.len());
+        for (url, bytes) in client.bulk_download_bytes(self.stylesheets.keys()).await? {
+            let mut stylesheet = StyleSheet::parse(
+                "test.css",
+                std::str::from_utf8(&*bytes).unwrap(),
+                ParserOptions::default(),
+            )
+            .unwrap();
+
+            // As of 2022 Send To Kindle supports epub natively. However files are still being
+            // converted internally (to mobi/azw3 ??). During this conversion process, the epub
+            // gets validated according to
+            // Kindle Publishing Guidelines https://kdp.amazon.com/en_US/help/topic/GR4KL488MXKPZ5BK,
+            // which has a rule:
+            // "Kindle limits usage of the display:none property for content blocks
+            // beyond 10000 characters. If the display:none property is applied to a content block
+            // that is bigger than 10000 characters, Kindle Previewer returns an error."
+            // However, the conversion tool (kindlegen ??) does not handle complex css rules
+            // properly (https://github.com/dvschultz/99problems/issues/50) which causes epubs sent
+            // via Send To Kindle to be rejected.
+            // The best workaround I came up with is to replace all "display: none" with
+            // "visibility: hidden". It's not the same as it leaves empty space but it's pretty close.
+            if self.kindle {
+                Self::rewrite_css_rules(&mut stylesheet.rules);
+            }
+            stylesheet.minify(MinifyOptions::default()).unwrap();
+            let res = stylesheet
+                .to_css(PrinterOptions {
+                    minify: true,
+                    ..PrinterOptions::default()
+                })
+                .unwrap();
+
+            self.zip.write_file(
+                OEBPS.as_path().join(self.stylesheets.get(url).unwrap()),
+                res.code.as_bytes(),
+            )?;
         }
 
         info!("Rendering OPF and generating final EPUB");
@@ -313,15 +385,15 @@ impl<'a> EpubBuilder<'a> {
         elements: &[TocElement],
         mut order: usize,
         mut depth: usize,
-    ) -> (usize, Vec<NavPoint>) {
+    ) -> (usize, usize, Vec<NavPoint>) {
         let navpoints = elements
             .iter()
             .map(|elem| {
-                order += 1;
-                let (child_depth, children) = Self::parse_navpoints(&elem.children, order, depth);
+                let (child_depth, new_order, children) =
+                    Self::parse_navpoints(&elem.children, order + 1, depth);
                 depth = depth.max(elem.depth).max(child_depth);
 
-                NavPoint {
+                let navpoint = NavPoint {
                     id: if elem.fragment.is_empty() {
                         &elem.id
                     } else {
@@ -331,16 +403,18 @@ impl<'a> EpubBuilder<'a> {
                     children,
                     label: &elem.label,
                     url: &elem.href,
-                }
+                };
+                order = new_order;
+                navpoint
             })
             .collect();
 
-        (depth, navpoints)
+        (depth, order, navpoints)
     }
 
     // Render toc.ncx
     pub fn toc(&mut self, toc: &[TocElement]) -> Result<&mut Self> {
-        let (depth, navpoints) = Self::parse_navpoints(toc, 0, 0);
+        let (depth, _, navpoints) = Self::parse_navpoints(toc, 0, 0);
         self.zip.write_file(
             OEBPS.as_path().join("toc.ncx"),
             Toc {
