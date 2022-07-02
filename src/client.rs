@@ -129,7 +129,7 @@ impl OreillyClient<Unauthenticated> {
         if let Err(err) = response.error_for_status_ref() {
             return Err(OrlyError::AuthenticationFailed(format!(
                 "Login request failed, make sure your email and password are correct: {}",
-                err.to_string()
+                err
             )));
         }
 

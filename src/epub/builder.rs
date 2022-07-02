@@ -243,24 +243,28 @@ impl<'a> EpubBuilder<'a> {
 
     fn rewrite_css_rules(parent_rules: &mut CssRuleList) {
         for rule in parent_rules.0.iter_mut() {
-            match rule {
-                CssRule::Style(StyleRule {
-                    declarations: DeclarationBlock { declarations, .. },
-                    rules,
-                    ..
-                }) => {
-                    for property in declarations.iter_mut() {
-                        if let Property::Display(Display::Keyword(DisplayKeyword::None)) = property
-                        {
-                            warn!("Found display: none, replacing");
-                            *property = Property::Visibility(Visibility::Hidden)
-                        }
-                    }
-                    if !rules.0.is_empty() {
-                        Self::rewrite_css_rules(rules)
+            if let CssRule::Style(StyleRule {
+                declarations:
+                    DeclarationBlock {
+                        declarations,
+                        important_declarations,
+                    },
+                rules,
+                ..
+            }) = rule
+            {
+                for property in declarations
+                    .iter_mut()
+                    .chain(important_declarations.iter_mut())
+                {
+                    if let Property::Display(Display::Keyword(DisplayKeyword::None)) = property {
+                        warn!("Found display: none, replacing");
+                        *property = Property::Visibility(Visibility::Hidden)
                     }
                 }
-                _ => (),
+                if !rules.0.is_empty() {
+                    Self::rewrite_css_rules(rules)
+                }
             };
         }
     }
@@ -268,7 +272,7 @@ impl<'a> EpubBuilder<'a> {
     pub async fn generate<W: tokio::io::AsyncWrite + std::marker::Unpin>(
         &mut self,
         to: W,
-        client: OreillyClient<Authenticated>,
+        client: &OreillyClient<Authenticated>,
     ) -> Result<()> {
         // Unique urls != unique filenames
         let images_count = self.images.len();

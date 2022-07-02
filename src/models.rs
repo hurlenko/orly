@@ -16,7 +16,7 @@ where
 {
     let vec: Vec<&str> = Deserialize::deserialize(deserializer)?;
     vec.into_iter()
-        .map(|s| Url::parse(s))
+        .map(Url::parse)
         .collect::<std::result::Result<_, _>>()
         .map_err(D::Error::custom)
 }

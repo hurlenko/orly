@@ -4,7 +4,7 @@ use crate::models::{Author, Subject};
 
 mod filters {
     pub fn to_id(s: &str) -> ::askama::Result<String> {
-        Ok(s.replace(".", "_").replace("/", "_"))
+        Ok(s.replace('.', "_").replace('/', "_"))
     }
 }
 

@@ -1,7 +1,12 @@
 use clap::{Parser, ValueHint};
 use fern::colors::{Color, ColoredLevelConfig};
 use log::{error, info};
-use orly::{client::OreillyClient, epub::builder::EpubBuilder, error::Result, models::Book};
+use orly::{
+    client::{Authenticated, OreillyClient},
+    epub::builder::EpubBuilder,
+    error::Result,
+    models::Book,
+};
 use sanitize_filename::sanitize;
 use std::path::{Path, PathBuf};
 use tokio::fs::File;
@@ -56,7 +61,7 @@ struct CliArgs {
     )]
     threads: usize,
     #[clap(help = "Book ID to download. Digits from the URL", required = true)]
-    book_id: String,
+    book_ids: Vec<String>,
     #[clap(
         short,
         long,
@@ -87,19 +92,13 @@ fn generate_filename(book: &Book) -> String {
     sanitize(filename)
 }
 
-async fn run(cli_args: &CliArgs) -> Result<()> {
-    let book_id = &cli_args.book_id;
-
-    let client = OreillyClient::new(cli_args.threads);
-    let client = if let Some(creds) = &cli_args.creds {
-        client.cred_auth(&creds[0], &creds[1]).await?
-    } else {
-        client
-            .cookie_auth(cli_args.cookie.as_ref().unwrap())
-            .await?
-    };
-
-    info!("Getting book info");
+async fn run(
+    client: &OreillyClient<Authenticated>,
+    book_id: &str,
+    output: &Path,
+    kindle: bool,
+) -> Result<()> {
+    info!("==== Getting book info =====");
     let book = client.fetch_book_details(book_id).await?;
     info!("Title: {:?}", book.title);
     info!(
@@ -115,10 +114,7 @@ async fn run(cli_args: &CliArgs) -> Result<()> {
 
     info!("Downloaded {} chapters", chapters.len());
 
-    let output = cli_args
-        .output
-        .join(generate_filename(&book))
-        .with_extension("epub");
+    let output = output.join(generate_filename(&book)).with_extension("epub");
 
     let file = File::create(&output)
         .await
@@ -126,7 +122,7 @@ async fn run(cli_args: &CliArgs) -> Result<()> {
     let toc = client.fetch_toc(book_id).await?;
     info!("Toc size: {}", toc.len());
 
-    EpubBuilder::new(&book, cli_args.kindle)?
+    EpubBuilder::new(&book, kindle)?
         .chapters(&chapters)?
         .toc(&toc)?
         .generate(file, client)
@@ -179,8 +175,19 @@ async fn main() -> Result<()> {
     let cli_args = CliArgs::parse();
     set_up_logging(cli_args.verbose);
 
-    if let Err(err) = run(&cli_args).await {
-        error!("{}", err)
+    let client = OreillyClient::new(cli_args.threads);
+    let client = if let Some(creds) = &cli_args.creds {
+        client.cred_auth(&creds[0], &creds[1]).await?
+    } else {
+        client
+            .cookie_auth(cli_args.cookie.as_ref().unwrap())
+            .await?
+    };
+
+    for book_id in cli_args.book_ids.iter() {
+        if let Err(err) = run(&client, book_id, &cli_args.output, cli_args.kindle).await {
+            error!("{}", err)
+        }
     }
 
     Ok(())
