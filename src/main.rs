@@ -40,23 +40,14 @@ struct CliArgs {
         required_unless_present = "creds"
     )]
     cookie: Option<String>,
-    #[clap(
-        short,
-        long,
-        help = "Tweak css to avoid overflow. Useful for e-readers"
-    )]
+    #[clap(short, long, help = "Apply CSS tweaks for kindle devices")]
     kindle: bool,
-    #[clap(
-        short,
-        long,
-        help = "Sets the level of verbosity",
-        parse(from_occurrences)
-    )]
+    #[clap(short, long, help = "Level of verbosity", parse(from_occurrences))]
     verbose: u8,
     #[clap(
         short,
         long,
-        help = "Sets the maximum number of concurrent http requests",
+        help = "Maximum number of concurrent http requests",
         default_value = "20"
     )]
     threads: usize,

@@ -159,7 +159,6 @@ jobs:
             echo "ASSET=$staging.zip" >> $GITHUB_ENV
           else
             cp "target/${{ matrix.target }}/release/$BINARY" "$BINARY"
-            strip "$BINARY"
             tar -czvf "$staging.tar.gz" "$BINARY"
             echo "ASSET=$staging.tar.gz" >> $GITHUB_ENV
           fi
@@ -212,7 +211,6 @@ jobs:
         run: |
           ARCHIVE="$BINARY-${{ needs.create-release.outputs.rg_version }}-x86_64-unknown-linux-musl.tar.gz"
           cp "target/x86_64-unknown-linux-musl/release/$BINARY" "$BINARY"
-          strip "$BINARY"
           tar -czvf "$ARCHIVE" "$BINARY"
           echo "ASSET=$ARCHIVE" >> $GITHUB_ENV
 
