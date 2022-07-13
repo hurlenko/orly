@@ -37,3 +37,5 @@ sanitize-filename = "0.4.0"
 log = "0.4.17"
 fern = { version="0.6.1", features=["colored"] }
 parcel_css = "1.0.0-alpha.27"
+image = "0.24.2"
+mime_guess = "2.0.4"

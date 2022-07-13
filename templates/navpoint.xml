@@ -1,4 +1,4 @@
-<navPoint id="{{ id }}" playOrder="{{ order }}">
+<navPoint id="{{ id|to_id }}" playOrder="{{ order }}">
     <navLabel>
         <text>{{ label }}</text>
     </navLabel>

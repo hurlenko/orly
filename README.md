@@ -41,7 +41,7 @@ You need to install the development headers of `libxml2` first. The process depe
     vcpkg install libxml2:x64-windows-static
     ```
 
-    Export compilator options to force static linking:
+    Export compiler options to force static linking:
     ```bash
     $env:RUSTFLAGS="-Ctarget-feature=+crt-static"
     ```
@@ -90,20 +90,18 @@ Currently `orly` supports these commands
 
 ```bash
 USAGE:
-    orly.exe [FLAGS] [OPTIONS] --creds <EMAIL PASSWORD>... <BOOK_ID>
+    orly [OPTIONS] <BOOK_IDS>...
 
 ARGS:
-    <BOOK_ID>    Book ID to download. Digits from the URL
-
-FLAGS:
-    -h, --help       Print help information
-    -k, --kindle     Tweak css to avoid overflow. Useful for e-readers
-    -v, --verbose    Sets the level of verbosity
-    -V, --version    Print version information
+    <BOOK_IDS>...    Book ID to download. Digits from the URL
 
 OPTIONS:
-    -c, --creds <EMAIL> <PASSWORD>     Sign in credentials
-        --cookie <COOKIE_STRING>       Cookie string
-    -o, --output <OUTPUT DIR>          Directory to save the final epub to [default: .]
-    -t, --threads <THREADS>            Sets the maximum number of concurrent http requests [default: 20]
+    -c, --creds <EMAIL> <PASSWORD>    Sign in credentials
+        --cookie <COOKIE_STRING>      Cookie string
+    -h, --help                        Print help information
+    -k, --kindle                      Apply CSS tweaks for kindle devices
+    -o, --output <OUTPUT DIR>         Directory to save the final epub to [default: .]
+    -t, --threads <THREADS>           Maximum number of concurrent http requests [default: 20]
+    -v, --verbose                     Level of verbosity
+    -V, --version                     Print version information
 ```

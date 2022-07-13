@@ -28,6 +28,9 @@
       {% for filename in styles %}
       <item id="{{ filename|to_id }}" href="{{ filename|safe }}" media-type="text/css" />
       {% endfor %}
+      {% for filename in css_deps %}
+      <item id="{{ filename|to_id }}" href="{{ filename|safe }}" media-type="{{ filename|mime }}" />
+      {% endfor %}
    </manifest>
    <spine toc="ncx">
       {% for filename in chapters %}
@@ -35,7 +38,7 @@
       {% endfor %}
    </spine>
    <guide>
-      <reference href="cover.xhtml" title="Cover" type="cover" />
+      <reference href="Text/cover.xhtml" title="Cover" type="cover" />
    </guide>
 </package>
 

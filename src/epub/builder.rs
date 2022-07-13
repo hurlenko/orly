@@ -1,10 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use std::{
-    ffi::OsStr,
-    path::{Path, PathBuf},
-};
-
 use crate::{
     client::{Authenticated, OreillyClient},
     epub::lxml::DocumentExt,
@@ -12,14 +7,21 @@ use crate::{
     models::{Book, Chapter, TocElement},
     templates::{ChapterXhtml, ContainerXml, ContentOpf, IbooksXml, NavPoint, Toc},
 };
+use std::{
+    ffi::OsStr,
+    io::Cursor,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use askama::Template;
 
+use image::{imageops::FilterType, ImageFormat, ImageOutputFormat};
 use libxml::{parser::Parser, tree::SaveOptions};
 use log::{debug, info, warn};
 use parcel_css::{
     declaration::DeclarationBlock,
+    dependencies::Dependency,
     properties::{
         display::{Display, DisplayKeyword, Visibility},
         Property,
@@ -32,11 +34,14 @@ use url::ParseError;
 use super::zip::ZipArchive;
 use lazy_static::lazy_static;
 
+use bytes::Bytes;
+use image::io::Reader as ImageReader;
 use parcel_css::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, StyleSheet};
 
 const XHTML: &str = "xhtml";
-const IMAGES: &str = "images";
-const STYLES: &str = "styles";
+const IMAGES: &str = "Images";
+const STYLES: &str = "Styles";
+const TEXT: &str = "Text";
 
 lazy_static! {
     static ref OEBPS: PathBuf = PathBuf::from("OEBPS");
@@ -45,10 +50,11 @@ lazy_static! {
 pub struct EpubBuilder<'a> {
     zip: ZipArchive,
     book: &'a Book,
+    base_files_url: Url,
     stylesheets: HashMap<Url, String>,
     images: HashMap<Url, String>,
     parser: Parser,
-    chapter_names: Vec<&'a str>,
+    chapter_names: Vec<String>,
     // image name
     cover: String,
     kindle: bool,
@@ -59,6 +65,11 @@ impl<'a> EpubBuilder<'a> {
         let mut epub = EpubBuilder {
             zip: ZipArchive::new()?,
             book,
+            base_files_url: Url::parse(&format!(
+                "https://learning.oreilly.com/api/v2/epubs/urn:orm:book:{}/files/",
+                book.identifier
+            ))
+            .unwrap(),
             kindle,
             parser: Parser::default_html(),
             stylesheets: Default::default(),
@@ -107,10 +118,10 @@ impl<'a> EpubBuilder<'a> {
 
         // For images and html create a new path
         let new_path = match path.extension().and_then(OsStr::to_str) {
-            Some("png" | "jpg" | "jpeg" | "gif") => path
-                .to_str()
-                .map(|filename| format!("{}/{}", IMAGES, filename)),
             Some("html") => path.with_extension(XHTML).to_str().map(str::to_string),
+            Some(ext) if ImageFormat::from_extension(ext).is_some() => path
+                .to_str()
+                .map(|filename| format!("../{}/{}", IMAGES, filename)),
             _ => return old.to_string(),
         };
 
@@ -154,18 +165,12 @@ impl<'a> EpubBuilder<'a> {
     }
 
     fn extract_images(&self, chapter: &Chapter) -> Result<Vec<(Url, String)>> {
-        let base_url = Url::parse(&format!(
-            "https://learning.oreilly.com/api/v2/epubs/urn:orm:book:{}/files/",
-            self.book.identifier
-        ))
-        .unwrap();
-
         let image_urls = chapter
             .meta
             .images
             .iter()
             .map(|x| {
-                base_url.join(x).ok().and_then(|url| {
+                self.base_files_url.join(x).ok().and_then(|url| {
                     PathBuf::from(url.path())
                         .file_name()
                         .and_then(OsStr::to_str)
@@ -203,15 +208,17 @@ impl<'a> EpubBuilder<'a> {
             should_support_kindle: self.kindle,
         };
 
-        let filename = OEBPS.as_path().join(&chapter.meta.filename);
+        let filename = format!("{}/{}", TEXT, chapter.meta.filename);
 
         self.zip.write_file(
-            filename,
+            OEBPS.as_path().join(&filename),
             chapter_xhtml
                 .render()
                 .context("failed to render chapter xhtml")?
                 .as_bytes(),
         )?;
+        self.chapter_names.push(filename);
+
         Ok(())
     }
 
@@ -231,8 +238,6 @@ impl<'a> EpubBuilder<'a> {
             self.images.extend(images);
             self.extract_styles(chapter)?;
 
-            self.chapter_names.push(&chapter.meta.filename);
-
             self.add_chapter(chapter)?;
         }
 
@@ -242,6 +247,19 @@ impl<'a> EpubBuilder<'a> {
     }
 
     fn rewrite_css_rules(parent_rules: &mut CssRuleList) {
+        // As of 2022 Send To Kindle supports epub natively. However files are still being
+        // converted internally (to mobi/azw3 ??). During this conversion process, the epub
+        // gets validated according to
+        // Kindle Publishing Guidelines https://kdp.amazon.com/en_US/help/topic/GR4KL488MXKPZ5BK,
+        // which has a rule:
+        // "Kindle limits usage of the display:none property for content blocks
+        // beyond 10000 characters. If the display:none property is applied to a content block
+        // that is bigger than 10000 characters, Kindle Previewer returns an error."
+        // However, the conversion tool (kindlegen ??) does not handle complex css rules
+        // properly (https://github.com/dvschultz/99problems/issues/50) which causes epubs sent
+        // via Send To Kindle to be rejected.
+        // The best workaround I came up with is to replace all "display: none" with
+        // "visibility: hidden". It's not the same as it leaves empty space but it's pretty close.
         for rule in parent_rules.0.iter_mut() {
             if let CssRule::Style(StyleRule {
                 declarations:
@@ -269,6 +287,65 @@ impl<'a> EpubBuilder<'a> {
         }
     }
 
+    fn optimize_image(&self, source_bytes: Bytes) -> (ImageFormat, Bytes) {
+        const KINDLE_WIDTH: u32 = 1072;
+
+        let image_reader = ImageReader::new(Cursor::new(&source_bytes));
+        // Skip everything smaller than this
+        if source_bytes.len() < 60 * 1024 {
+            debug!(
+                "File is too small ({}), skipping optimizations",
+                source_bytes.len()
+            );
+            return (
+                image_reader.format().unwrap_or(ImageFormat::Jpeg),
+                source_bytes,
+            );
+        }
+        let mut source_image = image_reader
+            .with_guessed_format()
+            .expect("Unknown image format")
+            .decode()
+            .expect("Unknown image format");
+
+        if self.kindle && source_image.width() > KINDLE_WIDTH {
+            debug!(
+                "Image is too big {}x{}, resing",
+                source_image.width(),
+                source_image.height()
+            );
+            source_image =
+                source_image.resize(KINDLE_WIDTH, source_image.height(), FilterType::Lanczos3);
+            debug!(
+                "New size: {}x{}",
+                source_image.width(),
+                source_image.height()
+            );
+        }
+
+        let mut result = Cursor::new(Vec::new());
+        let mut format = ImageFormat::Jpeg;
+
+        if source_image.color().has_alpha() {
+            debug!("Image has alpha channel, saving as png");
+            format = ImageFormat::Png;
+        }
+
+        source_image
+            .write_to(&mut result, ImageOutputFormat::from(format))
+            .expect("Failed to encode image");
+
+        let optimized = Bytes::copy_from_slice(result.get_ref());
+        debug!(
+            "Old image size: {}, new size: {}, relative change: {:.2}%",
+            source_bytes.len(),
+            optimized.len(),
+            (optimized.len() as f32 - source_bytes.len() as f32) / optimized.len() as f32 * 100.0
+        );
+
+        (format, optimized)
+    }
+
     pub async fn generate<W: tokio::io::AsyncWrite + std::marker::Unpin>(
         &mut self,
         to: W,
@@ -281,44 +358,61 @@ impl<'a> EpubBuilder<'a> {
             warn!("Images have non-unique names, some of them might get overwritten");
         }
 
-        info!("Downloading {} images", self.images.len());
+        info!("Downloading and optimizing {} images", self.images.len());
+        let mut image_mimetypes: Vec<(String, String)> = Vec::with_capacity(self.images.len());
         for (url, bytes) in client.bulk_download_bytes(self.images.keys()).await? {
+            debug!("Optimizing image {}", url);
+            let (extension, bytes) = self.optimize_image(bytes);
+            let filename = self.images.get(url).unwrap().clone();
+
             self.zip
-                .write_file(OEBPS.as_path().join(self.images.get(url).unwrap()), &*bytes)?;
+                .write_file(OEBPS.as_path().join(&filename), &*bytes)?;
+
+            image_mimetypes.push((filename, format!("{:?}", extension).to_ascii_lowercase()));
         }
 
         info!("Downloading {} css", self.stylesheets.len());
+        let mut css_dependencies = HashMap::new();
         for (url, bytes) in client.bulk_download_bytes(self.stylesheets.keys()).await? {
             let mut stylesheet = StyleSheet::parse(
                 "test.css",
-                std::str::from_utf8(&*bytes).unwrap(),
+                std::str::from_utf8(&bytes[..]).unwrap(),
                 ParserOptions::default(),
             )
             .unwrap();
 
-            // As of 2022 Send To Kindle supports epub natively. However files are still being
-            // converted internally (to mobi/azw3 ??). During this conversion process, the epub
-            // gets validated according to
-            // Kindle Publishing Guidelines https://kdp.amazon.com/en_US/help/topic/GR4KL488MXKPZ5BK,
-            // which has a rule:
-            // "Kindle limits usage of the display:none property for content blocks
-            // beyond 10000 characters. If the display:none property is applied to a content block
-            // that is bigger than 10000 characters, Kindle Previewer returns an error."
-            // However, the conversion tool (kindlegen ??) does not handle complex css rules
-            // properly (https://github.com/dvschultz/99problems/issues/50) which causes epubs sent
-            // via Send To Kindle to be rejected.
-            // The best workaround I came up with is to replace all "display: none" with
-            // "visibility: hidden". It's not the same as it leaves empty space but it's pretty close.
             if self.kindle {
                 Self::rewrite_css_rules(&mut stylesheet.rules);
             }
             stylesheet.minify(MinifyOptions::default()).unwrap();
+            let deps = stylesheet
+                .to_css(PrinterOptions {
+                    analyze_dependencies: true,
+                    ..PrinterOptions::default()
+                })
+                .unwrap()
+                .dependencies;
+
+            for dependency in deps.unwrap_or_default() {
+                match dependency {
+                    Dependency::Url(url) => {
+                        css_dependencies.insert(
+                            self.base_files_url
+                                .join(&url.url)
+                                .expect("Failed to build css deps url"),
+                            format!("{}/{}", STYLES, url.url),
+                        );
+                    }
+                    Dependency::Import(import) => warn!("css import dependecy: {:?}", import.url),
+                }
+            }
+
             let res = stylesheet
                 .to_css(PrinterOptions {
                     minify: true,
                     ..PrinterOptions::default()
                 })
-                .unwrap();
+                .expect("Failed to convert to css");
 
             self.zip.write_file(
                 OEBPS.as_path().join(self.stylesheets.get(url).unwrap()),
@@ -326,29 +420,28 @@ impl<'a> EpubBuilder<'a> {
             )?;
         }
 
+        info!("Downloading {} css dependencies", css_dependencies.len());
+        for (url, bytes) in client.bulk_download_bytes(css_dependencies.keys()).await? {
+            self.zip.write_file(
+                OEBPS.as_path().join(css_dependencies.get(url).unwrap()),
+                &bytes[..],
+            )?;
+        }
+
         info!("Rendering OPF and generating final EPUB");
-        self.render_opf()?.zip.generate(to).await?;
+        self.render_opf(&image_mimetypes, &css_dependencies.values().collect())?
+            .zip
+            .generate(to)
+            .await?;
         Ok(())
     }
 
     /// Render content.opf file
-    fn render_opf(&mut self) -> Result<&mut Self> {
-        let images_mime: Vec<(&String, String)> = self
-            .images
-            .iter()
-            .map(|(_, f)| {
-                (
-                    f,
-                    match PathBuf::from(f).extension().and_then(OsStr::to_str) {
-                        Some(ext) if ext.starts_with("jp") => "jpeg",
-                        Some(ext) => ext,
-                        None => "png",
-                    }
-                    .to_string(),
-                )
-            })
-            .collect();
-
+    fn render_opf(
+        &mut self,
+        image_mimetypes: &Vec<(String, String)>,
+        css_deps: &Vec<&String>,
+    ) -> Result<&mut Self> {
         let content_opf = ContentOpf {
             title: &self.book.title,
             description: &self.book.description,
@@ -368,10 +461,8 @@ impl<'a> EpubBuilder<'a> {
             subjects: &self.book.subjects,
             styles: &self.stylesheets.values().collect(),
             chapters: &self.chapter_names,
-            images: &images_mime
-                .iter()
-                .map(|(a, b)| (a.as_str(), b.as_str()))
-                .collect(),
+            images: image_mimetypes,
+            css_deps,
         };
 
         self.zip.write_file(
@@ -406,7 +497,7 @@ impl<'a> EpubBuilder<'a> {
                     order,
                     children,
                     label: &elem.label,
-                    url: &elem.href,
+                    url: format!("{}/{}", TEXT, elem.href),
                 };
                 order = new_order;
                 navpoint

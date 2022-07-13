@@ -3,8 +3,22 @@ use askama::Template;
 use crate::models::{Author, Subject};
 
 mod filters {
+    use std::path::Path;
+
     pub fn to_id(s: &str) -> ::askama::Result<String> {
-        Ok(s.replace('.', "_").replace('/', "_"))
+        Ok(s.chars()
+            .map(|c| match c {
+                '.' | '/' | ':' => '_',
+                c => c,
+            })
+            .collect())
+    }
+
+    pub fn mime(s: &str) -> ::askama::Result<String> {
+        Ok(mime_guess::from_path(Path::new(s))
+            .first_raw()
+            .unwrap_or("text/plain")
+            .to_string())
     }
 }
 
@@ -30,7 +44,7 @@ pub struct NavPoint<'a> {
     pub id: &'a str,
     pub order: usize,
     pub label: &'a str,
-    pub url: &'a str,
+    pub url: String,
     pub children: Vec<NavPoint<'a>>,
 }
 
@@ -59,6 +73,7 @@ pub struct ContentOpf<'a> {
     pub authors: &'a Vec<Author>,
     pub subjects: &'a Vec<Subject>,
     pub styles: &'a Vec<&'a String>,
-    pub chapters: &'a Vec<&'a str>,
-    pub images: &'a Vec<(&'a str, &'a str)>,
+    pub css_deps: &'a Vec<&'a String>,
+    pub chapters: &'a Vec<String>,
+    pub images: &'a Vec<(String, String)>,
 }
