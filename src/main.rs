@@ -8,8 +8,11 @@ use orly::{
     models::Book,
 };
 use sanitize_filename::sanitize;
-use std::path::{Path, PathBuf};
-use tokio::fs::File;
+use std::{
+    io::Cursor,
+    path::{Path, PathBuf},
+};
+use tokio::fs::write;
 
 use anyhow::Context;
 
@@ -107,18 +110,20 @@ async fn run(
 
     let output = output.join(generate_filename(&book)).with_extension("epub");
 
-    let file = File::create(&output)
-        .await
-        .context("Unable to create file")?;
     let toc = client.fetch_toc(book_id).await?;
     info!("Toc size: {}", toc.len());
+
+    let mut buffer = Cursor::new(Vec::new());
 
     EpubBuilder::new(&book, kindle)?
         .chapters(&chapters)?
         .toc(&toc)?
-        .generate(file, client)
+        .generate(&mut buffer, client)
         .await?;
 
+    write(&output, buffer.get_ref())
+        .await
+        .context("Failed to write data to file")?;
     info!("Done! Saved as {:?}", output);
 
     Ok(())
