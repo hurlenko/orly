@@ -17,14 +17,15 @@ name: Github Release
 on:
   push:
     # Enable when testing release infrastructure on a branch.
-    # branches:
-    #   - master
+    branches:
+      - master
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
 jobs:
   create-release:
     name: create-release
     runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     # env:
     #   # Set to force version number, e.g., when no tag exists.
     #   RG_VERSION: TEST-0.0.0
@@ -53,6 +54,7 @@ jobs:
   build-release:
     name: build-release
     needs: ["create-release"]
+    if: ${{ always() }}
     runs-on: ${{ matrix.os }}
     env:
       # For some builds, we use cross to test on 32-bit and big-endian
@@ -68,6 +70,7 @@ jobs:
       PKG_CONFIG_ALL_STATIC: "true"
       PKG_CONFIG_PATH: "/usr/local/opt/libxml2/lib/pkgconfig"
       MACOSX_DEPLOYMENT_TARGET: "10.7"
+      MACOSX_LIBXML_VER: "2.9.13"
     strategy:
       matrix:
         build: [macos, win-msvc]
@@ -82,11 +85,11 @@ jobs:
           #   target: i686-pc-windows-msvc
           - build: macos
             os: macos-latest
-            rust: nightly
+            rust: stable
             target: x86_64-apple-darwin
           - build: win-msvc
             os: windows-2019
-            rust: nightly
+            rust: stable
             target: x86_64-pc-windows-msvc
 
     steps:
@@ -98,18 +101,22 @@ jobs:
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          brew install libxml2 zlib
+          # Todo: find a way to link with icu
+          # Since version 2.9.14 brew ships libxml2 with icu support which I wasn't able
+          # to make to link correctly
+          # https://github.com/Homebrew/homebrew-core/commit/51f729ec63ff8963a300f2e779e51f3a1706cbd0
+          brew extract --version=$MACOSX_LIBXML_VER libxml2 homebrew/cask
+          brew install libxml2@$MACOSX_LIBXML_VER zlib
 
           # pkg-config-rs hack to force static linking for zlib
-          ln -s $(brew --prefix)/opt/zlib/include/zlib.h $(brew --prefix)/opt/libxml2/include/zlib.h
-          ln -s $(brew --prefix)/opt/zlib/lib/libz.a $(brew --prefix)/opt/libxml2/lib/libz.a
+          ln -s $(brew --prefix)/opt/zlib/include/zlib.h $(brew --prefix)/opt/libxml2@$MACOSX_LIBXML_VER/include/zlib.h
+          ln -s $(brew --prefix)/opt/zlib/lib/libz.a $(brew --prefix)/opt/libxml2@$MACOSX_LIBXML_VER/lib/libz.a
 
       - name: Restore from cache and install vcpkg (Windows x64)
         if: matrix.os == 'windows-2019'
-        uses: lukka/run-vcpkg@v7
+        uses: lukka/run-vcpkg@v10
         with:
-          setupOnly: true
-          vcpkgGitCommitId: "5568f110b509a9fd90711978a7cb76bae75bb092"
+          vcpkgGitCommitId: "cef0b3ec767df6e83806899fe9525f6cf8d7bc91"
 
       - name: Install dependencies (Windows x64)
         shell: bash
@@ -120,11 +127,9 @@ jobs:
           $VCPKG_ROOT/vcpkg install libxml2:x64-windows-static
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}
-          profile: minimal
-          override: true
           target: ${{ matrix.target }}
 
       - name: Use Cross
@@ -146,9 +151,10 @@ jobs:
         run: |
           # Required for windows builds
           export PATH=$PATH:${{env.VCPKG_ROOT}}
-          ${{ env.CARGO }} +nightly build ${{ env.TARGET_FLAGS }} --release --locked
+          ${{ env.CARGO }} build ${{ env.TARGET_FLAGS }} --release --locked
 
       - name: Build archive
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         shell: bash
         run: |
           staging="$BINARY-${{ needs.create-release.outputs.rg_version }}-${{ matrix.target }}"
@@ -164,6 +170,7 @@ jobs:
           fi
 
       - name: Upload release archive
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-release-asset@v1.0.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -178,11 +185,12 @@ jobs:
   # which solves the issue
 
   build-release-musl:
+    if: ${{ always() }}
     needs: ["create-release"]
     runs-on: ubuntu-latest
-    container: clux/muslrust:nightly
+    container: clux/muslrust:stable
     env:
-      LIBXML_VER: "2.9.12"
+      LIBXML_VER: "2.9.14"
       BINARY: "orly"
     steps:
       - name: Checkout repository
@@ -195,7 +203,7 @@ jobs:
 
       - name: Compile libxml2 against musl
         run: |
-          curl -sSL ftp://xmlsoft.org/libxml2/libxml2-$LIBXML_VER.tar.gz | tar xz
+          curl -sSL https://download.gnome.org/sources/libxml2/2.9/libxml2-$LIBXML_VER.tar.xz | tar xJ
           cd libxml2-$LIBXML_VER
           PREFIX=/musl CC="musl-gcc -fPIC -pie" LDFLAGS="-L$PREFIX/lib" CFLAGS="-I$PREFIX/include" \
             ./configure --with-lzma=no --prefix=$PREFIX --host=x86_64-unknown-linux-musl
@@ -204,9 +212,10 @@ jobs:
 
       - name: Build release binary
         run: |
-          cargo +nightly build --release --locked
+          cargo build --release --locked
 
       - name: Build archive
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         shell: bash
         run: |
           ARCHIVE="$BINARY-${{ needs.create-release.outputs.rg_version }}-x86_64-unknown-linux-musl.tar.gz"
@@ -216,6 +225,7 @@ jobs:
 
       - name: Upload release archive
         uses: actions/upload-release-asset@v1.0.1
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -227,6 +237,7 @@ jobs:
   publish-crate:
     name: publish-crate
     runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: ["build-release", "build-release-musl"]
     steps:
       - uses: actions/checkout@v1
