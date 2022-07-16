@@ -163,7 +163,6 @@ impl OreillyClient<Unauthenticated> {
         let client = Self::default_client()
             .default_headers(request_headers)
             .build()?;
-        self.check_subscription(&client).await?;
 
         Ok(OreillyClient {
             client,
