@@ -67,10 +67,9 @@ jobs:
       # Emit backtraces on panics.
       RUST_BACKTRACE: 1
       BINARY: "orly"
-      PKG_CONFIG_ALL_STATIC: "true"
-      PKG_CONFIG_PATH: "/usr/local/opt/libxml2/lib/pkgconfig"
       MACOSX_DEPLOYMENT_TARGET: "10.7"
       MACOSX_LIBXML_VER: "2.9.13"
+      PKG_CONFIG_ALL_STATIC: "true"
     strategy:
       matrix:
         build: [macos, win-msvc]
@@ -151,6 +150,8 @@ jobs:
         run: |
           # Required for windows builds
           export PATH=$PATH:${{env.VCPKG_ROOT}}
+          export PKG_CONFIG_PATH=/usr/local/opt/libxml2@$MACOSX_LIBXML_VER/lib/pkgconfig
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
           ${{ env.CARGO }} build ${{ env.TARGET_FLAGS }} --release --locked
 
       - name: Build archive
@@ -158,6 +159,10 @@ jobs:
         shell: bash
         run: |
           staging="$BINARY-${{ needs.create-release.outputs.rg_version }}-${{ matrix.target }}"
+
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            otool -L "target/${{ matrix.target }}/release/$BINARY"
+          fi
 
           if [ "${{ matrix.os }}" = "windows-2019" ]; then
             cp "target/${{ matrix.target }}/release/$BINARY.exe" "$BINARY.exe"
@@ -220,6 +225,7 @@ jobs:
         run: |
           ARCHIVE="$BINARY-${{ needs.create-release.outputs.rg_version }}-x86_64-unknown-linux-musl.tar.gz"
           cp "target/x86_64-unknown-linux-musl/release/$BINARY" "$BINARY"
+          ldd "$BINARY"
           tar -czvf "$ARCHIVE" "$BINARY"
           echo "ASSET=$ARCHIVE" >> $GITHUB_ENV
 
