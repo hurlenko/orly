@@ -18,7 +18,7 @@ on:
   push:
     # Enable when testing release infrastructure on a branch.
     branches:
-      - master
+      - develop
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
 jobs:
