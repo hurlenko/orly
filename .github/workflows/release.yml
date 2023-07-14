@@ -70,7 +70,7 @@ jobs:
       PKG_CONFIG_ALL_STATIC: "true"
       PKG_CONFIG_PATH: "/usr/local/opt/libxml2/lib/pkgconfig"
       MACOSX_DEPLOYMENT_TARGET: "10.7"
-      MACOSX_LIBXML_VER: "2.9.13"
+      MACOSX_LIBXML_VER: "2.11.4"
     strategy:
       matrix:
         build: [macos, win-msvc]
@@ -94,7 +94,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 1
 
@@ -105,7 +105,7 @@ jobs:
           # Since version 2.9.14 brew ships libxml2 with icu support which I wasn't able
           # to make to link correctly
           # https://github.com/Homebrew/homebrew-core/commit/51f729ec63ff8963a300f2e779e51f3a1706cbd0
-          brew extract --version=$MACOSX_LIBXML_VER libxml2 homebrew/cask
+          # brew extract --version=$MACOSX_LIBXML_VER libxml2 homebrew/cask
           brew install libxml2@$MACOSX_LIBXML_VER zlib
 
           # pkg-config-rs hack to force static linking for zlib
@@ -194,7 +194,7 @@ jobs:
       BINARY: "orly"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Link to predefined musl toolchain
         run: |
