@@ -224,6 +224,7 @@ jobs:
           curl -sSL https://github.com/cli/cli/releases/download/v2.32.0/gh_2.32.0_linux_amd64.tar.gz | tar xz
           mv gh*/bin/gh /usr/local/bin
           # Upload asset to release
+          git config --global --add safe.directory '*'
           gh release upload ${{ needs.create-release.outputs.rg_version }} ${{ env.ASSET }}
 
   publish-crate:
