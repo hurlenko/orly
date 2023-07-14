@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local, NaiveDate};
 use futures::stream::{self, StreamExt};
 
 use anyhow::Context;
@@ -82,26 +82,29 @@ impl OreillyClient<Unauthenticated> {
 
     async fn check_subscription(&self, client: &Client) -> Result<()> {
         info!("Validating subscription");
-        let response = client
-            .get(self.make_url("api/v1/payments/next_billing_date/")?)
-            .send()
-            .await?;
+        let response = client.get(self.make_url("api/v1/")?).send().await?;
 
         response.error_for_status_ref()?;
 
         let billing = response.json::<BillingInfo>().await?;
 
         trace!("Billing details: {:#?}", &billing);
+        let expiration = if let Some(sub_exp) = billing.subscription.cancellation_date {
+            let dt = NaiveDate::parse_from_str(&sub_exp, "%Y-%m-%d")
+                .context("failed to parse subscription expiration ")?;
+            dt.and_hms(0, 0, 0)
+        } else if let Some(trial_exp) = billing.trial.trial_expiration_date {
+            DateTime::parse_from_rfc3339(&trial_exp)
+                .context("Failed to parse trial expiration date")?
+                .naive_local()
+        } else {
+            return Err(crate::error::OrlyError::SubscriptionExpired);
+        };
 
-        let expiration = DateTime::parse_from_rfc3339(&billing.next_billing_date)
-            .context("Failed to parse next billing date")?;
+        info!("Subscription expiration: {}", expiration);
 
-        let local: DateTime<Local> = DateTime::from(expiration);
-
-        info!("Subscription expiration: {}", local);
-
-        if expiration < Utc::now() {
-            error!("Subscription expired on {}", local);
+        if expiration < Local::now().naive_local() {
+            error!("Subscription expired on {}", expiration);
             return Err(OrlyError::SubscriptionExpired);
         }
 
@@ -152,7 +155,7 @@ impl OreillyClient<Unauthenticated> {
     }
 
     pub async fn cookie_auth(self, cookie: &str) -> Result<OreillyClient<Authenticated>> {
-        info!("Logging into Safari Books Online usig cookies...");
+        info!("Logging into Safari Books Online using cookies...");
 
         let mut request_headers = HeaderMap::new();
         request_headers.insert(

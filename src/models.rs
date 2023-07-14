@@ -31,7 +31,18 @@ where
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct BillingInfo {
-    pub next_billing_date: String,
+    pub subscription: SubscriptionInfo,
+    pub trial: TrialInfo,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub(crate) struct SubscriptionInfo {
+    pub cancellation_date: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub(crate) struct TrialInfo {
+    pub trial_expiration_date: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
