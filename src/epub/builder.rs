@@ -18,16 +18,16 @@ use askama::Template;
 
 use image::{imageops::FilterType, ImageFormat, ImageOutputFormat};
 use libxml::{parser::Parser, tree::SaveOptions};
-use log::{debug, info, warn};
-use parcel_css::{
+use lightningcss::{
     declaration::DeclarationBlock,
-    dependencies::Dependency,
+    dependencies::{Dependency, DependencyOptions},
     properties::{
         display::{Display, DisplayKeyword, Visibility},
         Property,
     },
     rules::{style::StyleRule, CssRule, CssRuleList},
 };
+use log::{debug, info, warn};
 use reqwest::Url;
 use url::ParseError;
 
@@ -36,7 +36,7 @@ use lazy_static::lazy_static;
 
 use bytes::Bytes;
 use image::io::Reader as ImageReader;
-use parcel_css::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, StyleSheet};
+use lightningcss::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, StyleSheet};
 
 const XHTML: &str = "xhtml";
 const IMAGES: &str = "Images";
@@ -375,7 +375,6 @@ impl<'a> EpubBuilder<'a> {
         let mut css_dependencies = HashMap::new();
         for (url, bytes) in client.bulk_download_bytes(self.stylesheets.keys()).await? {
             let mut stylesheet = StyleSheet::parse(
-                "test.css",
                 std::str::from_utf8(&bytes[..]).unwrap(),
                 ParserOptions::default(),
             )
@@ -387,7 +386,9 @@ impl<'a> EpubBuilder<'a> {
             stylesheet.minify(MinifyOptions::default()).unwrap();
             let deps = stylesheet
                 .to_css(PrinterOptions {
-                    analyze_dependencies: true,
+                    analyze_dependencies: Some(DependencyOptions {
+                        remove_imports: true,
+                    }),
                     ..PrinterOptions::default()
                 })
                 .unwrap()

@@ -92,7 +92,7 @@ impl OreillyClient<Unauthenticated> {
         let expiration = if let Some(sub_exp) = billing.subscription.cancellation_date {
             let dt = NaiveDate::parse_from_str(&sub_exp, "%Y-%m-%d")
                 .context("failed to parse subscription expiration ")?;
-            dt.and_hms(0, 0, 0)
+            dt.and_hms_opt(0, 0, 0).unwrap()
         } else if let Some(trial_exp) = billing.trial.trial_expiration_date {
             DateTime::parse_from_rfc3339(&trial_exp)
                 .context("Failed to parse trial expiration date")?

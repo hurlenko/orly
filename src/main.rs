@@ -1,4 +1,4 @@
-use clap::{Parser, ValueHint};
+use clap::{ArgAction, Parser, ValueHint};
 use fern::colors::{Color, ColoredLevelConfig};
 use log::{error, info};
 use orly::{
@@ -16,9 +16,10 @@ use tokio::fs::write;
 
 use anyhow::Context;
 
-fn path_exists(v: &str) -> std::result::Result<(), String> {
-    if Path::new(v).exists() {
-        return Ok(());
+fn path_exists(v: &str) -> std::result::Result<PathBuf, String> {
+    let path_buf: PathBuf = PathBuf::from(v);
+    if path_buf.as_path().exists() {
+        return Ok(path_buf);
     }
     Err(format!("The specifiied path does not exist: {}", v))
 }
@@ -45,7 +46,7 @@ struct CliArgs {
     cookie: Option<String>,
     #[clap(short, long, help = "Apply CSS tweaks for kindle devices")]
     kindle: bool,
-    #[clap(short, long, help = "Level of verbosity", parse(from_occurrences))]
+    #[clap(short, long, help = "Level of verbosity", action = ArgAction::Count)]
     verbose: u8,
     #[clap(
         short,
@@ -61,10 +62,9 @@ struct CliArgs {
         long,
         help = "Directory to save the final epub to",
         name = "OUTPUT DIR",
-        parse(from_os_str),
         value_hint = ValueHint::DirPath,
         default_value = ".",
-        validator = path_exists,
+        value_parser = path_exists,
     )]
     output: PathBuf,
 }
