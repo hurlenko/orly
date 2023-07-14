@@ -116,7 +116,7 @@ jobs:
         if: matrix.os == 'windows-2019'
         uses: lukka/run-vcpkg@v10
         with:
-          vcpkgGitCommitId: "cef0b3ec767df6e83806899fe9525f6cf8d7bc91"
+          vcpkgGitCommitId: "f6a5d4e8eb7476b8d7fc12a56dff300c1c986131"
 
       - name: Install dependencies (Windows x64)
         shell: bash
