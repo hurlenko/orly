@@ -106,10 +106,12 @@ jobs:
           curl -SsL https://raw.githubusercontent.com/Homebrew/homebrew-core/937e2800a2e37ddc26ae40229ff5b86cc79a58af/Formula/libxml2.rb > libxml2.rb
           brew install libxml2.rb
           brew install zlib
+          ls -la /usr/local/opt/libxml2/lib/pkgconfig || true
+          ls -la /usr/local/opt/libxml2* || true
 
           # pkg-config-rs hack to force static linking for zlib
-          ln -s $(brew --prefix)/opt/zlib/include/zlib.h $(brew --prefix)/opt/libxml2@$MACOSX_LIBXML_VER/include/zlib.h
-          ln -s $(brew --prefix)/opt/zlib/lib/libz.a $(brew --prefix)/opt/libxml2@$MACOSX_LIBXML_VER/lib/libz.a
+          ln -s $(brew --prefix)/opt/zlib/include/zlib.h $(brew --prefix)/opt/libxml2/include/zlib.h
+          ln -s $(brew --prefix)/opt/zlib/lib/libz.a $(brew --prefix)/opt/libxml2/lib/libz.a
 
       - name: Restore from cache and install vcpkg (Windows x64)
         if: matrix.os == 'windows-2019'
