@@ -67,7 +67,6 @@ jobs:
       PKG_CONFIG_ALL_STATIC: "true"
       PKG_CONFIG_PATH: "/usr/local/opt/libxml2/lib/pkgconfig"
       MACOSX_DEPLOYMENT_TARGET: "10.7"
-      MACOSX_LIBXML_VER: "2.9.14"
     strategy:
       matrix:
         build: [macos, win-msvc]
@@ -100,15 +99,11 @@ jobs:
         run: |
           # Todo: find a way to link with icu
           # Since version 2.9.14 brew ships libxml2 with icu support which I wasn't able
-          # to make to link correctly
+          # to make to statically link correctly. Force-install pre-icu version
           # https://github.com/Homebrew/homebrew-core/commit/51f729ec63ff8963a300f2e779e51f3a1706cbd0
-          # brew extract --version=$MACOSX_LIBXML_VER libxml2 homebrew/cask
-          curl -SsL https://raw.githubusercontent.com/Homebrew/homebrew-core/b5cab1c639a4be33e04fbbd80f2e360102a080a8/Formula/libxml2.rb > libxml2.rb
-          sed -i '' 's/--with-icu/--without-icu/g' libxml2.rb
+          curl -SsL https://raw.githubusercontent.com/Homebrew/homebrew-core/937e2800a2e37ddc26ae40229ff5b86cc79a58af/Formula/libxml2.rb > libxml2.rb
           brew install libxml2.rb
           brew install zlib
-          ls -la /usr/local/opt/libxml2/lib/pkgconfig || true
-          ls -la /usr/local/opt/libxml2* || true
 
           # pkg-config-rs hack to force static linking for zlib
           ln -s $(brew --prefix)/opt/zlib/include/zlib.h $(brew --prefix)/opt/libxml2/include/zlib.h
@@ -224,7 +219,12 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ needs.create-release.outputs.rg_version }} ${{ env.ASSET }}
+        run: |
+          # Install gh cli
+          curl -sSL https://github.com/cli/cli/releases/download/v2.32.0/gh_2.32.0_linux_amd64.tar.gz | tar xz
+          mv gh*/bin/gh /usr/local/bin
+          # Upload asset to release
+          gh release upload ${{ needs.create-release.outputs.rg_version }} ${{ env.ASSET }}
 
   publish-crate:
     name: publish-crate
