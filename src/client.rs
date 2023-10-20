@@ -5,7 +5,7 @@ use chrono::{DateTime, Local, NaiveDate};
 use futures::stream::{self, StreamExt};
 
 use anyhow::Context;
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use reqwest::{
     header::{
         HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, COOKIE, UPGRADE_INSECURE_REQUESTS,
@@ -16,7 +16,10 @@ use reqwest::{
 
 use crate::{
     error::{OrlyError, Result},
-    models::{BillingInfo, Book, Chapter, ChapterMeta, ChaptersResponse, Credentials, TocElement},
+    models::{
+        BillingInfo, Book, Chapter, ChapterMeta, ChaptersResponse, Credentials, LoginLookup,
+        TocElement,
+    },
 };
 
 pub struct Authenticated;
@@ -71,10 +74,10 @@ impl OreillyClient<Unauthenticated> {
 
     fn default_client() -> ClientBuilder {
         let mut headers = HeaderMap::new();
-        headers.insert(ACCEPT, HeaderValue::from_static("application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"));
+        headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
         headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate"));
         headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
-        headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"));
+        headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36"));
         reqwest::Client::builder()
             .default_headers(headers)
             .cookie_store(true)
@@ -116,18 +119,43 @@ impl OreillyClient<Unauthenticated> {
         email: &str,
         password: &str,
     ) -> Result<OreillyClient<Authenticated>> {
-        info!("Logging into Safari Books Online...");
-
         let mut map = HashMap::new();
         map.insert("email", email);
+
+        info!("Checking if password login is possible");
+        let response = self
+            .client
+            .post("https://api.oreilly.com/api/m/v2/auth/lookup/")
+            .json(&map)
+            .send()
+            .await?;
+
+        debug!("Email lookup response: {:#?}", response);
+
+        let login_lookup = response.json::<LoginLookup>().await?;
+
+        if !login_lookup.password_login_allowed {
+            return Err(crate::error::OrlyError::PasswordLoginUnsupported(
+                email.to_string(),
+            ));
+        }
+
+        info!("Logging into Safari Books Online...");
+
         map.insert("password", password);
 
         let response = self
             .client
-            .post("https://www.oreilly.com/member/auth/login/")
+            .post("https://api.oreilly.com/api/v1/auth/login/")
             .json(&map)
+            .basic_auth(
+                "052079",
+                Some("00a63c08e9d240b6f4f14b93a135da227e8b9da99103db38c4b4eb4c"),
+            )
             .send()
             .await?;
+
+        debug!("Auth response: {:#?}", response);
 
         if let Err(err) = response.error_for_status_ref() {
             return Err(OrlyError::AuthenticationFailed(format!(

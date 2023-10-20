@@ -14,6 +14,8 @@ pub enum OrlyError {
     AuthenticationFailed(String),
     #[error("Subscription expired")]
     SubscriptionExpired,
+    #[error("Password login is not supported for account {0}")]
+    PasswordLoginUnsupported(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

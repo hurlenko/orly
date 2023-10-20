@@ -51,6 +51,11 @@ pub(crate) struct Credentials {
 }
 
 #[derive(Deserialize, Debug)]
+pub(crate) struct LoginLookup {
+    pub password_login_allowed: bool,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct Author {
     pub name: String,
 }
