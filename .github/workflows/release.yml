@@ -180,7 +180,7 @@ jobs:
     if: ${{ always() }}
     needs: ["create-release"]
     runs-on: ubuntu-latest
-    container: clux/muslrust:stable
+    container: clux/muslrust:1.71.0
     env:
       LIBXML_VER: "2.9.14"
       BINARY: "orly"
