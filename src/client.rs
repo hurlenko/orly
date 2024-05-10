@@ -91,6 +91,12 @@ impl OreillyClient<Unauthenticated> {
 
         let billing = response.json::<BillingInfo>().await?;
 
+        // Skip the entire expiration check if cancellation_date is None
+        if billing.subscription.cancellation_date.is_none() {
+          info!("Subscription is still valid, continuing to download the book...");
+          return Ok(());
+        }
+
         trace!("Billing details: {:#?}", &billing);
         let expiration = if let Some(sub_exp) = billing.subscription.cancellation_date {
             let dt = NaiveDate::parse_from_str(&sub_exp, "%Y-%m-%d")
