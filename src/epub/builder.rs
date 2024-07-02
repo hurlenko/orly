@@ -16,7 +16,7 @@ use std::{
 use anyhow::Context;
 use askama::Template;
 
-use image::{imageops::FilterType, ImageFormat, ImageOutputFormat};
+use image::{imageops::FilterType, ImageFormat};
 use libxml::{parser::Parser, tree::SaveOptions};
 use lightningcss::{
     declaration::DeclarationBlock,
@@ -35,6 +35,8 @@ use super::zip::ZipArchive;
 use lazy_static::lazy_static;
 
 use bytes::Bytes;
+use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::{CompressionType, PngEncoder};
 use image::io::Reader as ImageReader;
 use lightningcss::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, StyleSheet};
 
@@ -69,7 +71,7 @@ impl<'a> EpubBuilder<'a> {
                 "https://learning.oreilly.com/api/v2/epubs/urn:orm:book:{}/files/",
                 book.identifier
             ))
-            .unwrap(),
+                .unwrap(),
             kindle,
             parser: Parser::default_html(),
             stylesheets: Default::default(),
@@ -262,14 +264,14 @@ impl<'a> EpubBuilder<'a> {
         // "visibility: hidden". It's not the same as it leaves empty space but it's pretty close.
         for rule in parent_rules.0.iter_mut() {
             if let CssRule::Style(StyleRule {
-                declarations:
-                    DeclarationBlock {
-                        declarations,
-                        important_declarations,
-                    },
-                rules,
-                ..
-            }) = rule
+                                      declarations:
+                                      DeclarationBlock {
+                                          declarations,
+                                          important_declarations,
+                                      },
+                                      rules,
+                                      ..
+                                  }) = rule
             {
                 for property in declarations
                     .iter_mut()
@@ -289,18 +291,19 @@ impl<'a> EpubBuilder<'a> {
 
     fn optimize_image(&self, source_bytes: Bytes) -> (ImageFormat, Bytes) {
         const KINDLE_WIDTH: u32 = 1072;
+        const MIN_SIZE_TO_OPTIMIZE: usize = 60 * 1024;
+        const IMAGE_QUALITY: u8 = 75;  // 1-100
 
         let image_reader = ImageReader::new(Cursor::new(&source_bytes));
+        let original_format = image_reader.format().unwrap_or(ImageFormat::Jpeg);
+
         // Skip everything smaller than this
-        if source_bytes.len() < 60 * 1024 {
+        if source_bytes.len() < MIN_SIZE_TO_OPTIMIZE {
             debug!(
-                "File is too small ({}), skipping optimizations",
+                "File is too small ({}b), skipping optimizations",
                 source_bytes.len()
             );
-            return (
-                image_reader.format().unwrap_or(ImageFormat::Jpeg),
-                source_bytes,
-            );
+            return (original_format, source_bytes);
         }
         let mut source_image = image_reader
             .with_guessed_format()
@@ -310,7 +313,7 @@ impl<'a> EpubBuilder<'a> {
 
         if self.kindle && source_image.width() > KINDLE_WIDTH {
             debug!(
-                "Image is too big {}x{}, resing",
+                "Image is too big {}x{}, resizing",
                 source_image.width(),
                 source_image.height()
             );
@@ -324,16 +327,25 @@ impl<'a> EpubBuilder<'a> {
         }
 
         let mut result = Cursor::new(Vec::new());
-        let mut format = ImageFormat::Jpeg;
+        let mut output_format = ImageFormat::Jpeg;
 
-        if source_image.color().has_alpha() {
+        let encoding_result = if source_image.color().has_alpha() {
             debug!("Image has alpha channel, saving as png");
-            format = ImageFormat::Png;
-        }
+            output_format = ImageFormat::Png;
+            let encoder = PngEncoder::new_with_quality(&mut result, CompressionType::default(), image::codecs::png::FilterType::default());
+            source_image.write_with_encoder(encoder)
+        } else {
+            let encoder = JpegEncoder::new_with_quality(&mut result, IMAGE_QUALITY);
+            source_image.write_with_encoder(encoder)
+        };
 
-        source_image
-            .write_to(&mut result, ImageOutputFormat::from(format))
-            .expect("Failed to encode image");
+        if let Err(err) = encoding_result {
+            warn!(
+                "Failed to optimize image: {:#?}. Leaving unoptimized",
+                err.to_string()
+            );
+            return (original_format, source_bytes);
+        }
 
         let optimized = Bytes::copy_from_slice(result.get_ref());
         debug!(
@@ -343,7 +355,7 @@ impl<'a> EpubBuilder<'a> {
             (optimized.len() as f32 - source_bytes.len() as f32) / optimized.len() as f32 * 100.0
         );
 
-        (format, optimized)
+        (output_format, optimized)
     }
 
     pub async fn generate<W: tokio::io::AsyncWrite + std::marker::Unpin>(
@@ -360,9 +372,13 @@ impl<'a> EpubBuilder<'a> {
 
         info!("Downloading and optimizing {} images", self.images.len());
         let mut image_mimetypes: Vec<(String, String)> = Vec::with_capacity(self.images.len());
+        let mut images_size_bytes_before = 0f32;
+        let mut images_size_bytes_after = 0f32;
         for (url, bytes) in client.bulk_download_bytes(self.images.keys()).await? {
             debug!("Optimizing image {}", url);
+            images_size_bytes_before += bytes.len() as f32;
             let (extension, bytes) = self.optimize_image(bytes);
+            images_size_bytes_after += bytes.len() as f32;
             let filename = self.images.get(url).unwrap().clone();
 
             self.zip
@@ -370,7 +386,15 @@ impl<'a> EpubBuilder<'a> {
 
             image_mimetypes.push((filename, format!("{:?}", extension).to_ascii_lowercase()));
         }
-
+        images_size_bytes_before /= 1024.0 * 1024.0;
+        images_size_bytes_after /= 1024.0 * 1024.0;
+        info!(
+            "Image optimization results - before: {:.1}mb, after: {:.1}mb, diff: {:.1}mb ({:.2}%)",
+            images_size_bytes_before,
+            images_size_bytes_after,
+            images_size_bytes_after - images_size_bytes_before,
+            (images_size_bytes_after - images_size_bytes_before) / images_size_bytes_after * 100.0
+        );
         info!("Downloading {} css", self.stylesheets.len());
         let mut css_dependencies = HashMap::new();
         for (url, bytes) in client.bulk_download_bytes(self.stylesheets.keys()).await? {
@@ -378,7 +402,7 @@ impl<'a> EpubBuilder<'a> {
                 std::str::from_utf8(&bytes[..]).unwrap(),
                 ParserOptions::default(),
             )
-            .unwrap();
+                .unwrap();
 
             if self.kindle {
                 Self::rewrite_css_rules(&mut stylesheet.rules);
@@ -528,9 +552,9 @@ impl<'a> EpubBuilder<'a> {
                     .join(", "),
                 navpoints: &navpoints,
             }
-            .render()
-            .context("failed to render chapter xhtml")?
-            .as_bytes(),
+                .render()
+                .context("failed to render chapter xhtml")?
+                .as_bytes(),
         )?;
 
         Ok(self)

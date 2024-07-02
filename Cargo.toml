@@ -10,6 +10,7 @@ readme = "README.md"
 exclude = [
     ".github/*",
 ]
+rust-version = "1.79"
 
 [profile.release]
 opt-level = "z"     # Optimize for size.
@@ -28,14 +29,14 @@ thiserror = "1.0.43"
 chrono = "0.4.26"
 libxml = "0.3.2"
 futures = "0.3.28"
-askama = "0.12.0"
-bytes = "1.4.0"
+askama = "0.12.1"
+bytes = "1.6.0"
 zip = "0.6.6"
-lazy_static = "1.4.0"
+lazy_static = "1.5.0"
 clap = { version = "4.3.12", features = ["derive"] }
-sanitize-filename = "0.4.0"
-log = "0.4.19"
+sanitize-filename = "0.5.0"
+log = "0.4.22"
 fern = { version="0.6.2", features=["colored"] }
 lightningcss = "1.0.0-alpha.44"
-image = "0.24.6"
-mime_guess = "2.0.4"
+image = "0.25.1"
+mime_guess = "2.0.5"
