@@ -1,57 +1,45 @@
-# The way this works is the following:
-#
-# The create-release job runs purely to initialize the GitHub release itself
-# and to output upload_url for the following job.
-#
-# The build-release job runs only once create-release is finished. It gets the
-# release upload URL from create-release job outputs, then builds the release
-# executables for each supported platform and attaches them as release assets
-# to the previously created release.
-#
-# The key here is that we create the release only once.
-#
-# Reference:
-# https://eugene-babichenko.github.io/blog/2020/05/09/github-actions-cross-platform-auto-releases/
-
 name: Github Release
 on:
   push:
-    # Enable when testing release infrastructure on a branch.
-    branches:
-      - develop
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
+
+# We need this to be able to create releases.
+permissions:
+  contents: write
+
 jobs:
+  # The create-release job runs purely to initialize the GitHub release itself,
+  # and names the release after the `x.y.z` tag that was pushed. It's separate
+  # from building the release so that we only create the release once.
   create-release:
     name: create-release
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    # env:
-    #   # Set to force version number, e.g., when no tag exists.
-    #   RG_VERSION: TEST-0.0.0
-    outputs:
-      upload_url: ${{ steps.release.outputs.upload_url }}
-      rg_version: ${{ env.RG_VERSION }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Get the release version from the tag
-        shell: bash
-        if: env.RG_VERSION == ''
+        if: env.VERSION == ''
+        run: echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+      - name: Show the version
         run: |
-          # Apparently, this is the right way to get a tag name. Really?
-          #
-          # See: https://github.community/t5/GitHub-Actions/How-to-get-just-the-tag-name/m-p/32167/highlight/true#M1027
-          echo "RG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-          echo "version is: ${{ env.RG_VERSION }}"
+          echo "version is: $VERSION"
+      - name: Check that tag version and Cargo.toml version are the same
+        shell: bash
+        run: |
+          if ! grep -q "version = \"$VERSION\"" Cargo.toml; then
+            echo "version does not match Cargo.toml" >&2
+            exit 1
+          fi
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ env.RG_VERSION }}
+        run: gh release create $VERSION --draft --verify-tag --title $VERSION
+    outputs:
+      version: ${{ env.VERSION }}
 
   build-release:
     name: build-release
     needs: ["create-release"]
-    if: ${{ always() }}
     runs-on: ${{ matrix.os }}
     env:
       # For some builds, we use cross to test on 32-bit and big-endian
@@ -61,6 +49,10 @@ jobs:
       TARGET_FLAGS: ""
       # When CARGO is set to CROSS, TARGET_DIR includes matrix.target.
       TARGET_DIR: ./target
+      # Bump this as appropriate. We pin to a version to make sure CI
+      # continues to work as cross releases in the past have broken things
+      # in subtle ways.
+      CROSS_VERSION: v0.2.5
       # Emit backtraces on panics.
       RUST_BACKTRACE: 1
       BINARY: "orly"
@@ -68,34 +60,37 @@ jobs:
       PKG_CONFIG_PATH: "/usr/local/opt/libxml2/lib/pkgconfig"
       MACOSX_DEPLOYMENT_TARGET: "10.7"
     strategy:
+      fail-fast: false
       matrix:
-        build: [macos, win-msvc]
         include:
           # - build: linux-arm
           #   os: ubuntu-18.04
           #   rust: nightly
           #   target: arm-unknown-linux-gnueabihf
           # - build: win32-msvc
-          #   os: windows-2019
+          #   os: windows-latest
           #   rust: nightly
           #   target: i686-pc-windows-msvc
+          # - build: linux
+          #   os: ubuntu-latest
+          #   rust: stable
+          #   target: x86_64-unknown-linux-musl
+          #   strip: x86_64-linux-musl-strip
           - build: macos
-            os: macos-latest
+            os: macos-13  # macos-latest is arm-based
             rust: stable
             target: x86_64-apple-darwin
           - build: win-msvc
-            os: windows-2019
+            os: windows-latest
             rust: stable
             target: x86_64-pc-windows-msvc
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 1
+        uses: actions/checkout@v4
 
       - name: Install dependencies (macOS)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-13'
         run: |
           # Todo: find a way to link with icu
           # Since version 2.9.14 brew ships libxml2 with icu support which I wasn't able
@@ -110,34 +105,48 @@ jobs:
           ln -s $(brew --prefix)/opt/zlib/lib/libz.a $(brew --prefix)/opt/libxml2/lib/libz.a
 
       - name: Restore from cache and install vcpkg (Windows x64)
-        if: matrix.os == 'windows-2019'
+        if: matrix.os == 'windows-latest'
         uses: lukka/run-vcpkg@v10
         with:
           vcpkgGitCommitId: "f6a5d4e8eb7476b8d7fc12a56dff300c1c986131"
 
       - name: Install dependencies (Windows x64)
         shell: bash
-        if: matrix.os == 'windows-2019'
+        if: matrix.os == 'windows-latest'
         run: |
           # Using static libxml version along with "crt-static" rustflags 
           # in .cargo/config/toml allows building static binaries
           $VCPKG_ROOT/vcpkg install libxml2:x64-windows-static
+          $VCPKG_ROOT/vcpkg install libxml2:x86-windows-static
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
 
       - name: Use Cross
+        if: matrix.os == 'ubuntu-latest' && matrix.target != ''
+        run: |
+          # In the past, new releases of 'cross' have broken CI. So for now, we
+          # pin it. We also use their pre-compiled binary releases because cross
+          # has over 100 dependencies and takes a bit to compile.
+          dir="$RUNNER_TEMP/cross-download"
+          mkdir "$dir"
+          echo "$dir" >> $GITHUB_PATH
+          cd "$dir"
+          curl -LO "https://github.com/cross-rs/cross/releases/download/$CROSS_VERSION/cross-x86_64-unknown-linux-musl.tar.gz"
+          tar xf cross-x86_64-unknown-linux-musl.tar.gz
+          echo "CARGO=cross" >> $GITHUB_ENV
+
+      - name: Set target variables
         shell: bash
         run: |
-          cargo install cross
-          echo "CARGO=cross" >> $GITHUB_ENV
           echo "TARGET_FLAGS=--target ${{ matrix.target }}" >> $GITHUB_ENV
           echo "TARGET_DIR=./target/${{ matrix.target }}" >> $GITHUB_ENV
 
       - name: Show command used for Cargo
+        shell: bash
         run: |
           echo "cargo command is: ${{ env.CARGO }}"
           echo "target flag is: ${{ env.TARGET_FLAGS }}"
@@ -149,14 +158,34 @@ jobs:
           # Required for windows builds
           export PATH=$PATH:${{env.VCPKG_ROOT}}
           ${{ env.CARGO }} build ${{ env.TARGET_FLAGS }} --release --locked
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            bin="target/${{ matrix.target }}/release/$BINARY.exe"
+          else
+            bin="target/${{ matrix.target }}/release/$BINARY"
+          fi
+          echo "BIN=$bin" >> $GITHUB_ENV
 
-      - name: Build archive
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+      - name: Strip release binary (macos)
+        if: matrix.os == 'macos-13'
+        shell: bash
+        run: strip "$BIN"
+
+      - name: Strip release binary (cross)
+        if: env.CARGO == 'cross'
         shell: bash
         run: |
-          staging="$BINARY-${{ needs.create-release.outputs.rg_version }}-${{ matrix.target }}"
+          docker run --rm -v \
+          "$PWD/target:/target:Z" \
+          "ghcr.io/cross-rs/${{ matrix.target }}:main" \
+          "${{ matrix.strip }}" \
+          "/$BIN"
 
-          if [ "${{ matrix.os }}" = "windows-2019" ]; then
+      - name: Build archive
+        shell: bash
+        run: |
+          staging="$BINARY-${{ needs.create-release.outputs.version }}-${{ matrix.target }}"
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp "target/${{ matrix.target }}/release/$BINARY.exe" "$BINARY.exe"
             7z a "$staging.zip" "$BINARY.exe"
             echo "ASSET=$staging.zip" >> $GITHUB_ENV
@@ -167,10 +196,9 @@ jobs:
           fi
 
       - name: Upload release archive
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ needs.create-release.outputs.rg_version }} ${{ env.ASSET }}
+        run: gh release upload ${{ needs.create-release.outputs.version }} ${{ env.ASSET }}
   # Building musl version requires all dependencies to be built with musl too.
   # There are some issues when building musl version of libxml with cross
   # (specifically with openssl). clux/muslrust has musl-compiled version of openssl
@@ -186,7 +214,7 @@ jobs:
       BINARY: "orly"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Link to predefined musl toolchain
         run: |
@@ -207,16 +235,14 @@ jobs:
           cargo build --release --locked
 
       - name: Build archive
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         shell: bash
         run: |
-          ARCHIVE="$BINARY-${{ needs.create-release.outputs.rg_version }}-x86_64-unknown-linux-musl.tar.gz"
+          ARCHIVE="$BINARY-${{ needs.create-release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz"
           cp "target/x86_64-unknown-linux-musl/release/$BINARY" "$BINARY"
           tar -czvf "$ARCHIVE" "$BINARY"
           echo "ASSET=$ARCHIVE" >> $GITHUB_ENV
 
       - name: Upload release archive
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -225,15 +251,14 @@ jobs:
           mv gh*/bin/gh /usr/local/bin
           # Upload asset to release
           git config --global --add safe.directory '*'
-          gh release upload ${{ needs.create-release.outputs.rg_version }} ${{ env.ASSET }}
+          gh release upload ${{ needs.create-release.outputs.version }} ${{ env.ASSET }}
 
   publish-crate:
     name: publish-crate
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: ["build-release", "build-release-musl"]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: cargo login ${CRATES_IO_TOKEN}
         env:
           CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
