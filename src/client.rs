@@ -104,7 +104,8 @@ impl OreillyClient<Unauthenticated> {
                 .context("Failed to parse trial expiration date")?
                 .naive_local()
         } else {
-            return Err(crate::error::OrlyError::SubscriptionExpired);
+            // If subscription is not canceled AND not trial - assume the subscription is active
+            return Ok(());
         };
 
         info!("Subscription expiration: {}", expiration);
