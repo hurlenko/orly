@@ -77,7 +77,10 @@ impl OreillyClient<Unauthenticated> {
         headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
         headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate"));
         headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
-        headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36"));
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static("O'Reilly/9.1.0 iPhone"),
+        );
         reqwest::Client::builder()
             .default_headers(headers)
             .cookie_store(true)
@@ -149,8 +152,8 @@ impl OreillyClient<Unauthenticated> {
             .post("https://api.oreilly.com/api/v1/auth/login/")
             .json(&map)
             .basic_auth(
-                "052079",
-                Some("00a63c08e9d240b6f4f14b93a135da227e8b9da99103db38c4b4eb4c"),
+                "532409",
+                Some("ce1e4a0d4f726a27a6dbad88e4732c5f7dee15e36e15899971b5d5e7"),
             )
             .send()
             .await?;
