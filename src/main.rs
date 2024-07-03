@@ -21,7 +21,7 @@ fn path_exists(v: &str) -> std::result::Result<PathBuf, String> {
     if path_buf.as_path().exists() {
         return Ok(path_buf);
     }
-    Err(format!("The specifiied path does not exist: {}", v))
+    Err(format!("The specified path does not exist: {}", v))
 }
 
 #[derive(Parser, Debug)]

@@ -127,7 +127,7 @@ impl<'a> EpubBuilder<'a> {
             _ => return old.to_string(),
         };
 
-        // Append query params and fragmets, if any
+        // Append query params and fragments, if any
         if let Some(mut new_path) = new_path {
             if let Some(query) = abs_url.query() {
                 new_path.push('?');
@@ -249,7 +249,7 @@ impl<'a> EpubBuilder<'a> {
     }
 
     fn rewrite_css_rules(parent_rules: &mut CssRuleList) {
-        // As of 2022 Send To Kindle supports epub natively. However files are still being
+        // As of 2022 Send To Kindle supports epub natively. However, files are still being
         // converted internally (to mobi/azw3 ??). During this conversion process, the epub
         // gets validated according to
         // Kindle Publishing Guidelines https://kdp.amazon.com/en_US/help/topic/GR4KL488MXKPZ5BK,
@@ -261,7 +261,7 @@ impl<'a> EpubBuilder<'a> {
         // properly (https://github.com/dvschultz/99problems/issues/50) which causes epubs sent
         // via Send To Kindle to be rejected.
         // The best workaround I came up with is to replace all "display: none" with
-        // "visibility: hidden". It's not the same as it leaves empty space but it's pretty close.
+        // "visibility: hidden". It's not the same as it leaves empty space, but it's pretty close.
         for rule in parent_rules.0.iter_mut() {
             if let CssRule::Style(StyleRule {
                                       declarations:
@@ -358,7 +358,7 @@ impl<'a> EpubBuilder<'a> {
         (output_format, optimized)
     }
 
-    pub async fn generate<W: tokio::io::AsyncWrite + std::marker::Unpin>(
+    pub async fn generate<W: tokio::io::AsyncWrite + Unpin>(
         &mut self,
         to: W,
         client: &OreillyClient<Authenticated>,
@@ -428,7 +428,7 @@ impl<'a> EpubBuilder<'a> {
                             format!("{}/{}", STYLES, url.url),
                         );
                     }
-                    Dependency::Import(import) => warn!("css import dependecy: {:?}", import.url),
+                    Dependency::Import(import) => warn!("css import dependency: {:?}", import.url),
                 }
             }
 
