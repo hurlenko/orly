@@ -232,9 +232,12 @@ impl<'a> EpubBuilder<'a> {
                 .file_stem()
                 .and_then(OsStr::to_str)
             {
-                debug!("Found cover in {:?}", chapter.meta.filename);
-                assert_eq!(images.len(), 1);
-                self.cover = images[0].1.clone();
+                if images.len() > 0 {
+                    debug!("Found cover in {:?}", chapter.meta.filename);
+                    self.cover = images[0].1.clone();
+                } else {
+                    warn!("Cover chapter has no attached images, final book may not have a cover")
+                }
             }
 
             self.images.extend(images);
