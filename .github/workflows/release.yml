@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+env:
+  BINARY: "orly"
+  RUST_VERSION: "1.71.1"
+
 jobs:
   # The create-release job runs purely to initialize the GitHub release itself,
   # and names the release after the `x.y.z` tag that was pushed. It's separate
@@ -55,73 +59,33 @@ jobs:
       CROSS_VERSION: v0.2.5
       # Emit backtraces on panics.
       RUST_BACKTRACE: 1
-      BINARY: "orly"
       PKG_CONFIG_ALL_STATIC: "true"
-      PKG_CONFIG_ALLOW_CROSS: "true"
-      PKG_CONFIG_PATH: "/musl/lib/pkgconfig"
+      PKG_CONFIG_PATH: "/usr/local/opt/libxml2/lib/pkgconfig"
       MACOSX_DEPLOYMENT_TARGET: "10.7"
-      LIBXML_VER: "2.9.14"
-      PREFIX: "/musl"
     strategy:
       fail-fast: false
       matrix:
         include:
           # - build: linux-arm
           #   os: ubuntu-18.04
-          #   rust: nightly
           #   target: arm-unknown-linux-gnueabihf
           # - build: win32-msvc
           #   os: windows-latest
-          #   rust: nightly
           #   target: i686-pc-windows-msvc
-          - build: linux
-            os: ubuntu-latest
-            rust: stable
-            target: x86_64-unknown-linux-musl
-            strip: x86_64-linux-musl-strip
-#          - build: macos
-#            os: macos-13  # macos-latest is arm-based
-#            rust: stable
-#            target: x86_64-apple-darwin
-#          - build: win-msvc
-#            os: windows-latest
-#            rust: stable
-#            target: x86_64-pc-windows-msvc
+          # - build: linux
+          #   os: ubuntu-latest
+          #   target: x86_64-unknown-linux-musl
+          #   strip: x86_64-linux-musl-strip
+          - build: macos
+            os: macos-13  # macos-latest is arm-based
+            target: x86_64-apple-darwin
+          - build: win-msvc
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Install dependencies (linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          echo "Install musl dependencies"
-          sudo apt-get install musl-dev musl-tools
-
-          echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=$PREFIX" >> $GITHUB_ENV
-          export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
-          export LD_LIBRARY_PATH=$PREFIX
-          
-          echo "Set up a prefix for musl build libraries, make the linker's job of finding them easier"
-          sudo mkdir $PREFIX
-          sudo cat /etc/ld-musl-x86_64.path || true
-          echo "$PREFIX/lib" | sudo tee -a /etc/ld-musl-x86_64.path
-          sudo echo "After"
-          sudo cat /etc/ld-musl-x86_64.path
-          sudo cat /etc/ld-musl-x86_64.path || true
-          
-          sudo ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/x86_64-linux-musl/asm
-          sudo ln -s /usr/include/asm-generic /usr/include/x86_64-linux-musl/asm-generic
-          sudo ln -s /usr/include/linux /usr/include/x86_64-linux-musl/linux
-
-          echo "Compile libxml"
-          curl -sSL https://download.gnome.org/sources/libxml2/2.9/libxml2-$LIBXML_VER.tar.xz | tar xJ
-          cd libxml2-$LIBXML_VER
-          CC="musl-gcc -fPIC -pie" LDFLAGS="-L$PREFIX/lib" CFLAGS="-I$PREFIX/include" \
-            ./configure --with-lzma=no --with-zlib=no --with-python=no --prefix=$PREFIX --host=x86_64-unknown-linux-musl
-          make -j$(nproc)
-          sudo make install
 
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-13'
@@ -156,7 +120,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
           target: ${{ matrix.target }}
 
       - name: Use Cross
@@ -171,7 +135,7 @@ jobs:
           cd "$dir"
           curl -LO "https://github.com/cross-rs/cross/releases/download/$CROSS_VERSION/cross-x86_64-unknown-linux-musl.tar.gz"
           tar xf cross-x86_64-unknown-linux-musl.tar.gz
-          echo "CARGO=cargo" >> $GITHUB_ENV
+          echo "CARGO=cross" >> $GITHUB_ENV
 
       - name: Set target variables
         shell: bash
@@ -238,62 +202,66 @@ jobs:
   # (specifically with openssl). clux/muslrust has musl-compiled version of openssl
   # which solves the issue
 
-#  build-release-musl:
-#    if: ${{ always() }}
-#    needs: ["create-release"]
-#    runs-on: ubuntu-latest
-#    container: clux/muslrust:1.71.0
-#    env:
-#      LIBXML_VER: "2.9.14"
-#      BINARY: "orly"
-#    steps:
-#      - name: Checkout repository
-#        uses: actions/checkout@v4
-#
-#      - name: Link to predefined musl toolchain
-#        run: |
-#          ln -s /root/.cargo $HOME/.cargo
-#          ln -s /root/.rustup $HOME/.rustup
-#
-#      - name: Compile libxml2 against musl
-#        run: |
-#          curl -sSL https://download.gnome.org/sources/libxml2/2.9/libxml2-$LIBXML_VER.tar.xz | tar xJ
-#          cd libxml2-$LIBXML_VER
-#          PREFIX=/musl CC="musl-gcc -fPIC -pie" LDFLAGS="-L$PREFIX/lib" CFLAGS="-I$PREFIX/include" \
-#            ./configure --with-lzma=no --prefix=$PREFIX --host=x86_64-unknown-linux-musl
-#          make -j$(nproc)
-#          make install
-#
-#      - name: Build release binary
-#        run: |
-#          cargo build --release --locked
-#
-#      - name: Build archive
-#        shell: bash
-#        run: |
-#          ARCHIVE="$BINARY-${{ needs.create-release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz"
-#          cp "target/x86_64-unknown-linux-musl/release/$BINARY" "$BINARY"
-#          tar -czvf "$ARCHIVE" "$BINARY"
-#          echo "ASSET=$ARCHIVE" >> $GITHUB_ENV
-#
-#      - name: Upload release archive
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#        run: |
-#          # Install gh cli
-#          curl -sSL https://github.com/cli/cli/releases/download/v2.32.0/gh_2.32.0_linux_amd64.tar.gz | tar xz
-#          mv gh*/bin/gh /usr/local/bin
-#          # Upload asset to release
-#          git config --global --add safe.directory '*'
-#          gh release upload ${{ needs.create-release.outputs.version }} ${{ env.ASSET }}
-#
-#  publish-crate:
-#    name: publish-crate
-#    runs-on: ubuntu-latest
-#    needs: ["build-release", "build-release-musl"]
-#    steps:
-#      - uses: actions/checkout@v4
-#      - run: cargo login ${CRATES_IO_TOKEN}
-#        env:
-#          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-#      - run: cargo publish
+  build-release-musl:
+    needs: ["create-release"]
+    runs-on: ubuntu-latest
+    container: clux/muslrust:1.71.0
+    env:
+      LIBXML_VER: "2.9.14"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Link to predefined musl toolchain
+        run: |
+          ln -s /root/.cargo $HOME/.cargo
+          ln -s /root/.rustup $HOME/.rustup
+
+      - name: Compile libxml2 against musl
+        run: |
+          curl -sSL https://download.gnome.org/sources/libxml2/2.9/libxml2-$LIBXML_VER.tar.xz | tar xJ
+          cd libxml2-$LIBXML_VER
+          PREFIX=/musl CC="musl-gcc -fPIC -pie" LDFLAGS="-L$PREFIX/lib" CFLAGS="-I$PREFIX/include" \
+            ./configure --with-lzma=no --prefix=$PREFIX --host=x86_64-unknown-linux-musl
+          make -j$(nproc)
+          make install
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          target: x86_64-unknown-linux-musl
+
+      - name: Build release binary
+        run: |
+          cargo build --release --locked
+
+      - name: Build archive
+        shell: bash
+        run: |
+          ARCHIVE="$BINARY-${{ needs.create-release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz"
+          cp "target/x86_64-unknown-linux-musl/release/$BINARY" "$BINARY"
+          tar -czvf "$ARCHIVE" "$BINARY"
+          echo "ASSET=$ARCHIVE" >> $GITHUB_ENV
+
+      - name: Upload release archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Install gh cli
+          curl -sSL https://github.com/cli/cli/releases/download/v2.32.0/gh_2.32.0_linux_amd64.tar.gz | tar xz
+          mv gh*/bin/gh /usr/local/bin
+          # Upload asset to release
+          git config --global --add safe.directory '*'
+          gh release upload ${{ needs.create-release.outputs.version }} ${{ env.ASSET }}
+
+  publish-crate:
+    name: publish-crate
+    runs-on: ubuntu-latest
+    needs: ["build-release", "build-release-musl"]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo login ${CRATES_IO_TOKEN}
+        env:
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+      - run: cargo publish
