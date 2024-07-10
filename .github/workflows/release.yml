@@ -10,7 +10,7 @@ permissions:
 
 env:
   BINARY: "orly"
-  RUST_VERSION: "1.71.1"
+  RUST_VERSION: "1.72.1"
 
 jobs:
   # The create-release job runs purely to initialize the GitHub release itself,
