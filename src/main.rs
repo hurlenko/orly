@@ -32,7 +32,6 @@ struct CliArgs {
         long,
         value_names = &["EMAIL", "PASSWORD"],
         help = "Sign in credentials",
-        required_unless_present = "cookie",
         conflicts_with = "cookie",
         number_of_values = 2
     )]
@@ -41,7 +40,6 @@ struct CliArgs {
         long,
         value_name = "COOKIE_STRING",
         help = "Cookie string",
-        required_unless_present = "creds"
     )]
     cookie: Option<String>,
     #[clap(short, long, help = "Apply CSS tweaks for kindle devices")]
@@ -176,7 +174,7 @@ async fn main() -> Result<()> {
         client.cred_auth(&creds[0], &creds[1]).await?
     } else {
         client
-            .cookie_auth(cli_args.cookie.as_ref().unwrap())
+            .cookie_auth(cli_args.cookie)
             .await?
     };
 

@@ -10,8 +10,7 @@ use reqwest::{
     header::{
         HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, COOKIE, UPGRADE_INSECURE_REQUESTS,
         USER_AGENT,
-    },
-    Client, ClientBuilder, Url,
+    }, Client, ClientBuilder, Url
 };
 
 use crate::{
@@ -186,13 +185,19 @@ impl OreillyClient<Unauthenticated> {
         })
     }
 
-    pub async fn cookie_auth(self, cookie: &str) -> Result<OreillyClient<Authenticated>> {
+    pub async fn cookie_auth(self, cookie: Option<String>) -> Result<OreillyClient<Authenticated>> {
         info!("Logging into Safari Books Online using cookies...");
-
+        let cookie = if let Some(cookie) = cookie {
+            cookie
+        } else {
+            rookie::enums::CookieToString::to_string(&rookie::load(None).map_err(|e| {
+                OrlyError::AuthenticationFailed(format!("Failed to lookup cookies: {e}"))
+            })?.into_iter().filter(|c| c.domain.contains("oreilly")).collect::<Vec<_>>())
+        };
         let mut request_headers = HeaderMap::new();
         request_headers.insert(
             COOKIE,
-            HeaderValue::from_str(cookie).context("Invalid cookie")?,
+            HeaderValue::from_str(&cookie).context("Invalid cookie")?,
         );
 
         let client = Self::default_client()

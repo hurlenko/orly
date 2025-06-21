@@ -84,6 +84,9 @@ After installation, the `orly` command will be available. Check the [command lin
     orly 1234567890 --cookie 'BrowserCookie=....'
     ```
 
+- If no credentials or cookies are provided, `orly` will attempt to lookup the cookies stored in
+  your browser(s)
+
 ## Command line interface
 
 Currently `orly` supports these commands

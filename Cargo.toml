@@ -40,3 +40,4 @@ fern = { version="0.6.2", features=["colored"] }
 lightningcss = "1.0.0-alpha.57"
 image = "0.24.6"
 mime_guess = "2.0.5"
+rookie = "0.5.6"
